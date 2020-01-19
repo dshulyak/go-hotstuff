@@ -6,6 +6,14 @@ import (
 	"github.com/dshulyak/go-hotstuff/types"
 )
 
+func NewTimeouts(verifier Verifier, majority int) *Timeouts {
+	return &Timeouts{
+		verifier: verifier,
+		majority: majority,
+		received: map[uint64]struct{}{},
+	}
+}
+
 type Timeouts struct {
 	verifier Verifier
 	view     uint64
@@ -38,6 +46,14 @@ func (t *Timeouts) Collect(nview *types.NewView) bool {
 	}
 	t.received[nview.Voter] = struct{}{}
 	return len(t.received) >= t.majority
+}
+
+func NewVotes(verifier Verifier, majority int) *Votes {
+	return &Votes{
+		verifier: verifier,
+		majority: majority,
+		votes:    map[uint64]struct{}{},
+	}
 }
 
 // Votes keeps track of votes for a block in a round.
@@ -88,4 +104,37 @@ func (v *Votes) Collect(vote *types.Vote) bool {
 	v.votes[vote.Voter] = struct{}{}
 	v.verifier.Merge(v.Cert, vote)
 	return len(v.votes) >= v.majority
+}
+
+func ImportGenesis(store *BlockStore, genesis *types.Block) error {
+	hash := genesis.Header.Hash()
+	header, err := store.GetHeader(hash)
+	if err == nil && header != nil {
+		return nil
+	}
+	if err := store.SaveHeader(genesis.Header); err != nil {
+		return err
+	}
+	if err := store.SaveCertificate(genesis.Cert); err != nil {
+		return err
+	}
+	if err := store.SaveData(hash, genesis.Data); err != nil {
+		return err
+	}
+	if err := store.SaveView(header.View + 1); err != nil {
+		return err
+	}
+	if err := store.SaveVoted(header.View); err != nil {
+		return err
+	}
+	if err := store.SetTag(PrepareTag, hash); err != nil {
+		return err
+	}
+	if err := store.SetTag(LockedTag, hash); err != nil {
+		return err
+	}
+	if err := store.SetTag(DecideTag, hash); err != nil {
+		return err
+	}
+	return nil
 }

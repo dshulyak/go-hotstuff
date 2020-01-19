@@ -17,6 +17,57 @@ type Verifier interface {
 	Merge(*types.Certificate, *types.Vote)
 }
 
+func newConsensus(
+	logger *zap.Logger,
+	store *BlockStore,
+	signer Signer,
+	verifier Verifier,
+	id uint64,
+	replicas []uint64,
+) *consensus {
+	logger = logger.Named("consensus").With(zap.Uint64("replica", id))
+	view, err := store.GetView()
+	if err != nil {
+		logger.Fatal("failed to load view", zap.Error(err))
+	}
+	voted, err := store.GetVoted()
+	if err != nil {
+		logger.Fatal("failed to load voted view", zap.Error(err))
+	}
+	prepare, err := store.GetTagHeader(PrepareTag)
+	if err != nil {
+		logger.Fatal("failed to load prepare header", zap.Error(err))
+	}
+	locked, err := store.GetTagHeader(LockedTag)
+	if err != nil {
+		logger.Fatal("failed to load locked header", zap.Error(err))
+	}
+	commit, err := store.GetTagHeader(DecideTag)
+	if err != nil {
+		logger.Fatal("failed to load commit header", zap.Error(err))
+	}
+	prepareCert, err := store.GetTagCert(PrepareTag)
+	if err != nil {
+		logger.Fatal("failed to load prepare certificate", zap.Error(err))
+	}
+	return &consensus{
+		logger:      logger,
+		store:       store,
+		signer:      signer,
+		verifier:    verifier,
+		id:          id,
+		replicas:    replicas,
+		timeouts:    NewTimeouts(verifier, 2*len(replicas)/3+1),
+		votes:       NewVotes(verifier, 2*len(replicas)/3+1),
+		prepare:     prepare,
+		locked:      locked,
+		commit:      commit,
+		prepareCert: prepareCert,
+		view:        view,
+		voted:       voted,
+	}
+}
+
 type consensus struct {
 	logger *zap.Logger
 	store  *BlockStore
@@ -79,6 +130,10 @@ func (c *consensus) Step(msg *types.Message) {
 	case *types.Message_Newview:
 		c.onNewView(m.Newview)
 	}
+}
+
+func (c *consensus) Start() {
+	c.nextRound(false)
 }
 
 func (c *consensus) onTimeout() {
