@@ -112,7 +112,8 @@ func (c *consensus) nextRound(timedout bool) {
 		nview := &types.NewView{
 			View: c.view - 1,
 			Cert: c.prepareCert,
-			Sig:  c.signer.Sign(nil, EncodeUint64(c.view-1)),
+			// TODO prehash encoded uint
+			Sig: c.signer.Sign(nil, EncodeUint64(c.view-1)),
 		}
 		c.voted = c.view - 1
 		err := c.store.SaveVoted(c.voted)
