@@ -8,12 +8,11 @@ import (
 type Tag []byte
 
 const (
-	headerBucket = 1
-	dataBucket   = 2
-	certBucket   = 3
-
-	viewBucket  = 4 // bucket to keep track of the last view
-	votedBucket = 5 // bucket to keep track of the last voted view
+	headerBucket byte = iota + 1
+	dataBucket
+	certBucket
+	viewBucket  // bucket to keep track of the last view
+	votedBucket // bucket to keep track of the last voted view
 )
 
 var (
@@ -23,62 +22,141 @@ var (
 	ExecTag    = Tag("e")
 )
 
+func partsKey(part byte, hash []byte) []byte {
+	key := make([]byte, len(hash)+1)
+	key[0] = part
+	copy(key[1:], hash)
+	return key
+}
+
+func headerKey(hash []byte) []byte {
+	return partsKey(headerBucket, hash)
+}
+
+func dataKey(hash []byte) []byte {
+	return partsKey(dataBucket, hash)
+}
+
+func certKey(hash []byte) []byte {
+	return partsKey(certBucket, hash)
+}
+
+func NewBlockStore(db *leveldb.DB) *BlockStore {
+	return &BlockStore{db: db}
+}
+
 type BlockStore struct {
 	db *leveldb.DB
+
+	// TODO majority of this writes need to be fsynced
+	// also all writes for the same event should be batched
+	// therefore use batch for all writes and write it with Sync=true
 }
 
 func (s *BlockStore) GetHeader(hash []byte) (*types.Header, error) {
-	return nil, nil
+	header := &types.Header{}
+	buf, err := s.db.Get(headerKey(hash), nil)
+	if err != nil {
+		return nil, err
+	}
+	if err := header.Unmarshal(buf); err != nil {
+		return nil, err
+	}
+	return header, nil
 }
 
 func (s *BlockStore) SaveHeader(header *types.Header) error {
-	return nil
+	buf, err := header.Marshal()
+	if err != nil {
+		return err
+	}
+	return s.db.Put(headerKey(header.Hash()), buf, nil)
 }
 
 func (s *BlockStore) GetCertificate(hash []byte) (*types.Certificate, error) {
-	return nil, nil
+	cert := &types.Certificate{}
+	buf, err := s.db.Get(certKey(hash), nil)
+	if err != nil {
+		return nil, err
+	}
+	if err := cert.Unmarshal(buf); err != nil {
+		return nil, err
+	}
+	return cert, nil
 }
 
 func (s *BlockStore) SaveCertificate(cert *types.Certificate) error {
-	return nil
+	buf, err := cert.Marshal()
+	if err != nil {
+		return err
+	}
+	return s.db.Put(certKey(cert.Block), buf, nil)
 }
 
 func (s *BlockStore) SaveData(hash []byte, data *types.Data) error {
-	return nil
+	buf, err := data.Marshal()
+	if err != nil {
+		return err
+	}
+	return s.db.Put(dataKey(hash), buf, nil)
 }
 
 func (s *BlockStore) GetData(hash []byte) (*types.Data, error) {
-	return nil, nil
+	data := &types.Data{}
+	buf, err := s.db.Get(dataKey(hash), nil)
+	if err != nil {
+		return nil, err
+	}
+	if err := data.Unmarshal(buf); err != nil {
+		return nil, err
+	}
+	return data, nil
 }
 
 func (s *BlockStore) SetTag(tag Tag, hash []byte) error {
-	return nil
+	return s.db.Put([]byte(tag), hash, nil)
+}
+
+func (s *BlockStore) GetTag(tag Tag) ([]byte, error) {
+	return s.db.Get([]byte(tag), nil)
 }
 
 func (s *BlockStore) GetTagHeader(tag Tag) (*types.Header, error) {
-	return nil, nil
+	hash, err := s.GetTag(tag)
+	if err != nil {
+		return nil, err
+	}
+	return s.GetHeader(hash)
 }
 
 func (s *BlockStore) GetTagCert(tag Tag) (*types.Certificate, error) {
-	return nil, nil
-}
-
-func (s *BlockStore) GetTagData(tag Tag) (*types.Data, error) {
-	return nil, nil
+	hash, err := s.GetTag(tag)
+	if err != nil {
+		return nil, err
+	}
+	return s.GetCertificate(hash)
 }
 
 func (s *BlockStore) SaveView(view uint64) error {
-	return nil
+	return s.db.Put([]byte{viewBucket}, EncodeUint64(view), nil)
 }
 
 func (s *BlockStore) GetView() (uint64, error) {
-	return 0, nil
+	data, err := s.db.Get([]byte{viewBucket}, nil)
+	if err != nil {
+		return 0, err
+	}
+	return DecodeUint64(data), nil
 }
 
 func (s *BlockStore) SaveVoted(voted uint64) error {
-	return nil
+	return s.db.Put([]byte{votedBucket}, EncodeUint64(voted), nil)
 }
 
 func (s *BlockStore) GetVoted() (uint64, error) {
-	return 0, nil
+	data, err := s.db.Get([]byte{votedBucket}, nil)
+	if err != nil {
+		return 0, err
+	}
+	return DecodeUint64(data), nil
 }
