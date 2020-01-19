@@ -1,0 +1,62 @@
+syntax = "proto3";
+
+message Message {
+        oneof type {
+                Proposal proposal = 1;
+                NewView newview = 2;
+                Vote vote = 3;
+        }
+}
+
+// Proposal carries header and data of the new proposal and certificate of the parent.
+message Proposal {
+        Header header = 1;
+        Data data = 2;
+        bytes sig = 3;
+        Certificate parentCert = 4;
+}
+
+message NewView {
+        uint64 view = 1;
+        uint64 voter = 2;
+        bytes sig = 3;
+        Certificate cert = 4;
+}
+
+// Block will be used mostly for synchronization of the replicas that lag behind.
+message Block {
+        Header header = 1;
+        Data data = 2;
+        Certificate cert = 3;
+}
+
+message Header {
+        uint64 view = 1;
+        bytes parent = 2;
+        bytes dataRoot = 3;
+}
+
+// Vote should be naturally aggregated into the certificate.
+message Vote {
+        bytes block = 1;
+        uint64 voter = 2;
+        bytes sig = 3;
+}
+
+message Certificate {
+        bytes block = 1;
+        uint64 view = 2;
+        repeated uint64 voters = 3;
+        repeated bytes sigs = 4; // TODO will be replaced with single aggregated signature
+}
+
+message Data {
+        repeated Transaction data = 1;
+}
+
+message Transaction {
+        bytes account = 1;
+        uint64 nonce = 2;
+        bytes data = 3;
+        bytes sig = 4;
+}
