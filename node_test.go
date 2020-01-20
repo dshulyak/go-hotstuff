@@ -75,7 +75,7 @@ func nodeProgress(ctx context.Context, n *Node, broadcast func(context.Context, 
 		select {
 		case <-ctx.Done():
 			n.Close()
-			return ctx.Err()
+			return nil
 		case msgs := <-n.Messages():
 			go broadcast(ctx, msgs)
 		case headers := <-n.Blocks():
@@ -159,6 +159,50 @@ func TestNodesProgressMessagesDropped(t *testing.T) {
 		n := n
 		go func() {
 			errors <- nodeProgress(ctx, n, broadcast, 3)
+			wg.Done()
+		}()
+	}
+	go func() {
+		wg.Wait()
+		close(errors)
+	}()
+	for err := range errors {
+		require.NoError(t, err)
+	}
+
+	testChainConsistency(t, nodes)
+}
+
+func TestNodesProposalDropped(t *testing.T) {
+	nodes := createNodes(t, 4, 20*time.Millisecond)
+	// 5th proposal will be droppped
+	count := 5
+	broadcast := func(ctx context.Context, msgs []MsgTo) {
+		for _, msg := range msgs {
+			if msg.Message.GetProposal() != nil {
+				count--
+				if count == 0 {
+					continue
+				}
+			}
+			for _, n := range nodes {
+				n.Step(ctx, msg.Message)
+			}
+		}
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+
+	var (
+		errors = make(chan error, len(nodes))
+		wg     sync.WaitGroup
+	)
+	for _, n := range nodes {
+		wg.Add(1)
+		n := n
+		go func() {
+			errors <- nodeProgress(ctx, n, broadcast, 10)
 			wg.Done()
 		}()
 	}

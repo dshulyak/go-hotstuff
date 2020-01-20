@@ -225,8 +225,6 @@ func (c *consensus) onProposal(msg *types.Proposal) {
 		logger.Debug("header for parent is not found", zap.Error(err))
 		return
 	}
-	c.logger.Debug("parent is in database", zap.Uint64("parent view", parent.View))
-
 	// TODO this needs to be incorporated into updatePrepare routine
 	// if chain is extended we need to enter new round after proposal
 	prevView := c.prepare.View
@@ -239,11 +237,14 @@ func (c *consensus) onProposal(msg *types.Proposal) {
 	// but if 2f+1 replicas will sign byzantine block with view set to MaxUint64
 	// protocol won't be able to make progress anymore
 	// and i can't find a condition that prevents it
-	if msg.Header.View != c.view {
-		logger.Debug("proposal view doesn't match local view",
-			zap.Uint64("local", c.view))
-		return
-	}
+	// TODO this needs to be enabled when timeout certificate will be introduced
+	/*
+		if msg.Header.View != c.view {
+			logger.Debug("proposal view doesn't match local view",
+		    zap.Uint64("local", c.view))
+			return
+		}
+	*/
 	if bytes.Compare(msg.Header.Parent, msg.ParentCert.Block) != 0 {
 		logger.Debug("proposal parent doesn't match provided certificate")
 		return
