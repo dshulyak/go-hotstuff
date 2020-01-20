@@ -2,6 +2,7 @@ package hotstuff
 
 import (
 	"bytes"
+	"fmt"
 
 	"github.com/dshulyak/go-hotstuff/types"
 	"go.uber.org/zap"
@@ -25,7 +26,7 @@ func newConsensus(
 	id uint64,
 	replicas []uint64,
 ) *consensus {
-	logger = logger.Named("consensus").With(zap.Uint64("replica", id))
+	logger = logger.Named(fmt.Sprintf("replica=%d", id))
 	view, err := store.GetView()
 	if err != nil {
 		logger.Fatal("failed to load view", zap.Error(err))
@@ -120,7 +121,11 @@ func (c *consensus) Send(root []byte, data *types.Data) {
 			ParentCert: c.prepareCert,
 			Sig:        c.signer.Sign(nil, header.Hash()),
 		}
-		c.logger.Debug("sending proposal", zap.Uint64("view", c.view))
+		c.logger.Debug("sending proposal",
+			zap.Uint64("view", c.view),
+			zap.Binary("hash", header.Hash()),
+			zap.Binary("parent", header.Parent),
+			zap.Uint64("signer", c.id))
 		c.Progress.AddMessage(NewProposalMsg(proposal))
 	}
 }
@@ -149,13 +154,17 @@ func (c *consensus) onTimeout() {
 	c.nextRound(true)
 }
 
+func (c *consensus) resetTimeout() {
+	c.ticks = 0
+	c.timeout = c.newTimeout()
+}
+
 func (c *consensus) nextRound(timedout bool) {
 	logger := c.logger.With(zap.Uint64("view", c.view))
-	logger.Debug("entered new view")
+	logger.Debug("entered new view", zap.Bool("timedout", timedout))
 
-	c.ticks = 0
+	c.resetTimeout()
 	c.waitingData = false
-	c.timeout = c.newTimeout()
 	c.votes.Reset()
 
 	// timeouts will be collected for two rounds, before leadership and the round when replica is a leader
@@ -165,6 +174,7 @@ func (c *consensus) nextRound(timedout bool) {
 	// if this replica is a leader for next view start collecting new view messages
 	if c.id == c.getLeader(c.view+1) {
 		logger.Debug("ready to collect new-view messages")
+		c.timeouts.Reset()
 		c.timeouts.Start(c.view)
 	}
 
@@ -193,7 +203,13 @@ func (c *consensus) nextRound(timedout bool) {
 }
 
 func (c *consensus) onProposal(msg *types.Proposal) {
-	logger := c.logger.With(zap.String("msg", "proposal"), zap.Uint64("view", msg.Header.View))
+	logger := c.logger.With(
+		zap.String("msg", "proposal"),
+		zap.Uint64("view", c.view),
+		zap.Uint64("header view", msg.Header.View),
+		zap.Uint64("prepare view", c.prepare.View),
+		zap.Binary("hash", msg.Header.Hash()),
+		zap.Binary("parent", msg.Header.Parent))
 
 	logger.Debug("received proposal")
 	if bytes.Compare(msg.Header.Parent, msg.ParentCert.Block) != 0 {
@@ -209,7 +225,15 @@ func (c *consensus) onProposal(msg *types.Proposal) {
 		logger.Debug("header for parent is not found", zap.Error(err))
 		return
 	}
+	c.logger.Debug("parent is in database", zap.Uint64("parent view", parent.View))
+
+	// TODO this needs to be incorporated into updatePrepare routine
+	// if chain is extended we need to enter new round after proposal
+	prevView := c.prepare.View
 	c.updatePrepare(parent, msg.ParentCert)
+	if parent.View > prevView {
+		c.nextRound(false)
+	}
 
 	// this condition is not in the spec
 	// but if 2f+1 replicas will sign byzantine block with view set to MaxUint64
@@ -228,7 +252,7 @@ func (c *consensus) onProposal(msg *types.Proposal) {
 	// TODO log verification errors
 	// validate that a proposal received from an expected leader for this round
 	if !c.verifier.VerifySingle(leader, msg.Header.Hash(), msg.Sig) {
-		logger.Debug("proposal is not signed correctly")
+		logger.Debug("proposal is not signed correctly", zap.Uint64("signer", leader))
 		return
 	}
 
@@ -292,6 +316,7 @@ func (c *consensus) update(header *types.Header, cert *types.Certificate) {
 
 	// 2-chain locked, gaps are allowed
 	if gparent.View > c.locked.View {
+		c.logger.Debug("new block locked", zap.Uint64("view", gparent.View), zap.Binary("hash", gparent.Hash()))
 		c.locked = gparent
 		err := c.store.SetTag(LockedTag, gparent.Hash())
 		if err != nil {
@@ -299,7 +324,8 @@ func (c *consensus) update(header *types.Header, cert *types.Certificate) {
 		}
 	}
 	// 3-chain commited must be without gaps
-	if gparent.View-parent.View == 1 && ggparent.View-gparent.View == 1 {
+	if parent.View-gparent.View == 1 && gparent.View-ggparent.View == 1 {
+		c.logger.Debug("new block commited", zap.Uint64("view", ggparent.View), zap.Binary("hash", ggparent.Hash()))
 		c.commit = ggparent
 		err := c.store.SetTag(DecideTag, ggparent.Hash())
 		if err != nil {
@@ -360,11 +386,10 @@ func (c *consensus) newTimeout() int {
 func (c *consensus) onVote(vote *types.Vote) {
 	// next leader is reponsible for aggregating votes from the previous round
 	logger := c.logger.With(zap.String("msg", "vote"), zap.Uint64("voter", vote.Voter))
-	logger.Debug("received vote")
 	if c.id != c.getLeader(c.view+1) {
-		logger.Debug("current replica is not a leader for next view")
 		return
 	}
+	logger.Debug("received vote")
 	if !c.votes.Collect(vote) {
 		// do nothing if there is no majority
 		return
@@ -375,11 +400,10 @@ func (c *consensus) onVote(vote *types.Vote) {
 }
 
 func (c *consensus) onNewView(msg *types.NewView) {
-	c.logger.Debug("received new-view", zap.Uint64("timedout view", msg.View))
 	if c.id != c.getLeader(msg.View+1) {
-		c.logger.Debug("not a leader for view", zap.Uint64("view", msg.View+1))
 		return
 	}
+	c.logger.Debug("received new-view", zap.Uint64("timedout view", msg.View))
 	header, err := c.store.GetHeader(msg.Cert.Block)
 	if err != nil {
 		c.logger.Debug("can't find parent of the block")

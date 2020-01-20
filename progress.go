@@ -22,6 +22,10 @@ type Progress struct {
 	WaitingData bool
 }
 
+func (p *Progress) Empty() bool {
+	return len(p.Messages) == 0 && len(p.Headers) == 0 && !p.WaitingData
+}
+
 func (p *Progress) AddMessage(msg *types.Message, recipients ...uint64) {
 	p.Messages = append(p.Messages, MsgTo{Recipients: recipients, Message: msg})
 }
