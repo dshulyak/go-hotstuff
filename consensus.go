@@ -174,7 +174,6 @@ func (c *consensus) nextRound(timedout bool) {
 	// if this replica is a leader for next view start collecting new view messages
 	if c.id == c.getLeader(c.view+1) {
 		logger.Debug("ready to collect new-view messages")
-		c.timeouts.Reset()
 		c.timeouts.Start(c.view)
 	}
 
@@ -327,7 +326,7 @@ func (c *consensus) update(header *types.Header, cert *types.Certificate) {
 	}
 	// 3-chain commited must be without gaps
 	if parent.View-gparent.View == 1 && gparent.View-ggparent.View == 1 {
-		c.logger.Debug("new block commited", zap.Uint64("view", ggparent.View), zap.Binary("hash", ggparent.Hash()))
+		c.logger.Info("new  commited", zap.Uint64("view", ggparent.View), zap.Binary("hash", ggparent.Hash()))
 		c.commit = ggparent
 		err := c.store.SetTag(DecideTag, ggparent.Hash())
 		if err != nil {
@@ -405,10 +404,13 @@ func (c *consensus) onNewView(msg *types.NewView) {
 	if c.id != c.getLeader(msg.View+1) {
 		return
 	}
-	c.logger.Debug("received new-view", zap.Uint64("timedout view", msg.View))
+	c.logger.Debug("received new-view",
+		zap.Uint64("timedout view", msg.View),
+		zap.Binary("certificate for", msg.Cert.Block))
+
 	header, err := c.store.GetHeader(msg.Cert.Block)
 	if err != nil {
-		c.logger.Debug("can't find parent of the block")
+		c.logger.Debug("can't find block", zap.Binary("block", msg.Cert.Block))
 		return
 	}
 

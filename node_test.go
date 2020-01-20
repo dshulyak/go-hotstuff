@@ -117,7 +117,7 @@ func TestNodesProgressMessagesDropped(t *testing.T) {
 
 	nodes := createNodes(t, 4, 20*time.Millisecond)
 	broadcast := func(ctx context.Context, msgs []MsgTo) {
-		if rng.Intn(100) < 5 {
+		if rng.Intn(100) < 10 {
 			return
 		}
 		for _, msg := range msgs {
@@ -138,7 +138,7 @@ func TestNodesProgressMessagesDropped(t *testing.T) {
 		wg.Add(1)
 		n := n
 		go func() {
-			errors <- nodeProgress(ctx, n, broadcast, 10)
+			errors <- nodeProgress(ctx, n, broadcast, 3)
 			wg.Done()
 		}()
 	}
