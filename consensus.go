@@ -314,6 +314,8 @@ func (c *consensus) update(header *types.Header, cert *types.Certificate) {
 		return
 	}
 
+	// TODO 1-2 chain blocks should be emitted also so that transaction pool can be adjusted accordingly
+
 	// 2-chain locked, gaps are allowed
 	if gparent.View > c.locked.View {
 		c.logger.Debug("new block locked", zap.Uint64("view", gparent.View), zap.Binary("hash", gparent.Hash()))
