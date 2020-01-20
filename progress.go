@@ -11,13 +11,11 @@ func (m *MsgTo) Broadcast() bool {
 	return m.Recipients == nil
 }
 
-// Progress is a egress endpoint for interaction with consensus module.
+// Progress is an endpoint for interaction with consensus module.
 // Consensus is expected to interact with:
 // - transaction pool (notify that node can propose a new block)
 // - state machine (block verification and executing new commited blocks)
 // - network (sending and receiving messages)
-// TODO Each of those will be running in its own goroutine, so it makes sense to split Progress into distinct objects
-// both for performance and clarity.
 type Progress struct {
 	Messages    []MsgTo
 	Headers     []*types.Header
@@ -30,6 +28,12 @@ func (p *Progress) AddMessage(msg *types.Message, recipients ...uint64) {
 
 func (p *Progress) AddHeader(header *types.Header) {
 	p.Headers = append(p.Headers, header)
+}
+
+func (p *Progress) Reset() {
+	p.WaitingData = false
+	p.Messages = nil
+	p.Headers = nil
 }
 
 func NewVoteMsg(vote *types.Vote) *types.Message {

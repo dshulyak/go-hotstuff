@@ -22,6 +22,9 @@ type Timeouts struct {
 }
 
 func (t *Timeouts) Start(view uint64) {
+	if t.view != 0 {
+		panic("timeouts must be reset before starting collection for another view")
+	}
 	t.view = view
 }
 
@@ -35,6 +38,9 @@ func (t *Timeouts) Reset() {
 func (t *Timeouts) Collect(nview *types.NewView) bool {
 	// 0 is a genesis
 	if t.view == 0 {
+		return false
+	}
+	if t.view != nview.View {
 		return false
 	}
 	_, exist := t.received[nview.Voter]
@@ -108,10 +114,11 @@ func (v *Votes) Collect(vote *types.Vote) bool {
 
 func ImportGenesis(store *BlockStore, genesis *types.Block) error {
 	hash := genesis.Header.Hash()
-	header, err := store.GetHeader(hash)
-	if err == nil && header != nil {
+	exist, err := store.GetHeader(hash)
+	if err == nil && exist != nil {
 		return nil
 	}
+	header := genesis.Header
 	if err := store.SaveHeader(genesis.Header); err != nil {
 		return err
 	}

@@ -37,6 +37,7 @@ func (v *Ed25519Verifier) VerifyCert(cert *types.Certificate) bool {
 		if !valid {
 			return false
 		}
+		count++
 	}
 	return count >= v.threshold
 }
