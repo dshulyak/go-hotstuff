@@ -90,6 +90,9 @@ func (n *Node) Store() *BlockStore {
 	return n.store
 }
 
+// Send data after receiving Ready signal.
+// Note that sending data doesn't guarantee that data will be commited
+// or even proposed.
 func (n *Node) Send(ctx context.Context, data Data) error {
 	select {
 	case <-ctx.Done():
@@ -101,6 +104,7 @@ func (n *Node) Send(ctx context.Context, data Data) error {
 	return nil
 }
 
+// Step should be called every time when new message is received from any peer.
 func (n *Node) Step(ctx context.Context, msg *types.Message) error {
 	select {
 	case <-ctx.Done():
@@ -112,10 +116,12 @@ func (n *Node) Step(ctx context.Context, msg *types.Message) error {
 	return nil
 }
 
+// Ready emit signals whenever node a leader and can make a proposal.
 func (n *Node) Ready() <-chan struct{} {
 	return n.waitingData
 }
 
+// Blocks will emit headers of the commited blocks.
 func (n *Node) Blocks() <-chan []*types.Header {
 	return n.blocks
 }

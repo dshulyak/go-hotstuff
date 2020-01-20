@@ -174,6 +174,7 @@ func (c *consensus) nextRound(timedout bool) {
 	// if this replica is a leader for next view start collecting new view messages
 	if c.id == c.getLeader(c.view+1) {
 		logger.Debug("ready to collect new-view messages")
+		c.timeouts.Reset()
 		c.timeouts.Start(c.view)
 	}
 

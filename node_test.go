@@ -55,16 +55,17 @@ func createNodes(tb testing.TB, n int, interval time.Duration) []*Node {
 func nodeProgress(ctx context.Context, n *Node, broadcast func(context.Context, []MsgTo), max int) error {
 	count := 0
 	n.Start()
-	defer n.Close()
 	for {
 		select {
 		case <-ctx.Done():
+			n.Close()
 			return ctx.Err()
 		case msgs := <-n.Messages():
 			go broadcast(ctx, msgs)
 		case headers := <-n.Blocks():
 			count += len(headers)
 			if count >= max {
+				n.Close()
 				return nil
 			}
 		case <-n.Ready():
@@ -113,9 +114,12 @@ func TestNodesProgressWithoutErrors(t *testing.T) {
 }
 
 func TestNodesProgressMessagesDropped(t *testing.T) {
+	// TODO this test is very random. there should be periods of asynchrony, not constant possibility of messages
+	// being dropped, otherwise chances of establishing 3-chain are very low
+
 	rng := rand.New(rand.NewSource(*seed))
 
-	nodes := createNodes(t, 4, 20*time.Millisecond)
+	nodes := createNodes(t, 7, 20*time.Millisecond)
 	broadcast := func(ctx context.Context, msgs []MsgTo) {
 		if rng.Intn(100) < 10 {
 			return
