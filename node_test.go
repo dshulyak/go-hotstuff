@@ -52,6 +52,22 @@ func createNodes(tb testing.TB, n int, interval time.Duration) []*Node {
 	return nodes
 }
 
+func testChainConsistency(tb testing.TB, nodes []*Node) {
+	headers := map[uint64][]byte{}
+	for _, n := range nodes {
+		iter := NewChainIterator(n.Store())
+		iter.Next()
+		for ; iter.Valid(); iter.Next() {
+			hash, exist := headers[iter.Header().View]
+			if !exist {
+				headers[iter.Header().View] = iter.Header().Hash()
+			} else {
+				require.Equal(tb, hash, iter.Header().Hash())
+			}
+		}
+	}
+}
+
 func nodeProgress(ctx context.Context, n *Node, broadcast func(context.Context, []MsgTo), max int) error {
 	count := 0
 	n.Start()
@@ -110,7 +126,7 @@ func TestNodesProgressWithoutErrors(t *testing.T) {
 		require.NoError(t, err)
 	}
 
-	// TODO compare histories after test
+	testChainConsistency(t, nodes)
 }
 
 func TestNodesProgressMessagesDropped(t *testing.T) {
@@ -154,5 +170,5 @@ func TestNodesProgressMessagesDropped(t *testing.T) {
 		require.NoError(t, err)
 	}
 
-	// TODO compare histories after test
+	testChainConsistency(t, nodes)
 }

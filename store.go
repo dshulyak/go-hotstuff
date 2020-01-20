@@ -160,3 +160,54 @@ func (s *BlockStore) GetVoted() (uint64, error) {
 	}
 	return DecodeUint64(data), nil
 }
+
+func NewChainIterator(store *BlockStore) *ChainIterator {
+	return &ChainIterator{
+		store: store,
+	}
+}
+
+type ChainIterator struct {
+	store *BlockStore
+	err   error
+
+	header      *types.Header
+	certificate *types.Certificate
+	data        *types.Data
+}
+
+func (ci *ChainIterator) Err() error {
+	return ci.err
+}
+
+func (ci *ChainIterator) Valid() bool {
+	return ci.err == nil
+}
+
+func (ci *ChainIterator) Next() {
+	ci.certificate = nil
+	ci.data = nil
+	if ci.header == nil {
+		ci.header, ci.err = ci.store.GetTagHeader(DecideTag)
+	} else {
+		ci.header, ci.err = ci.store.GetHeader(ci.header.Parent)
+	}
+}
+
+func (ci *ChainIterator) Ceritificate() *types.Certificate {
+	if ci.certificate == nil {
+		ci.certificate, ci.err = ci.store.GetCertificate(ci.header.Hash())
+	}
+	return ci.certificate
+}
+
+func (ci *ChainIterator) Data() *types.Data {
+	if ci.data == nil {
+		ci.data, ci.err = ci.store.GetData(ci.header.Hash())
+	}
+	return ci.data
+}
+
+func (ci *ChainIterator) Header() *types.Header {
+	return ci.header
+}
