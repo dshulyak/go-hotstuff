@@ -20,6 +20,7 @@ type Timeouts struct {
 	view     uint64
 	majority int
 	received map[uint64]struct{}
+	Cert     *types.TimeoutCertificate
 }
 
 func (t *Timeouts) Start(view uint64) {
@@ -27,6 +28,10 @@ func (t *Timeouts) Start(view uint64) {
 		panic("timeouts must be reset before starting collection for another view")
 	}
 	t.view = view
+	t.Cert = &types.TimeoutCertificate{
+		View: view,
+		Sig:  &types.AggregatedSignature{},
+	}
 }
 
 func (t *Timeouts) Reset() {
@@ -34,6 +39,7 @@ func (t *Timeouts) Reset() {
 	for k := range t.received {
 		delete(t.received, k)
 	}
+	t.Cert = nil
 }
 
 func (t *Timeouts) Collect(nview *types.NewView) bool {
@@ -52,6 +58,7 @@ func (t *Timeouts) Collect(nview *types.NewView) bool {
 		return false
 	}
 	t.received[nview.Voter] = struct{}{}
+	t.verifier.Merge(t.Cert.Sig, nview.Voter, nview.Sig)
 	return len(t.received) >= t.majority
 }
 
@@ -78,6 +85,7 @@ type Votes struct {
 func (v *Votes) Start(header *types.Header) {
 	v.Cert = &types.Certificate{
 		Block: header.Hash(),
+		Sig:   &types.AggregatedSignature{},
 	}
 	v.Header = header
 }
@@ -109,7 +117,7 @@ func (v *Votes) Collect(vote *types.Vote) bool {
 		return false
 	}
 	v.votes[vote.Voter] = struct{}{}
-	v.verifier.Merge(v.Cert, vote)
+	v.verifier.Merge(v.Cert.Sig, vote.Voter, vote.Sig)
 	return len(v.votes) >= v.majority
 }
 

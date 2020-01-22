@@ -32,8 +32,8 @@ func createNodes(tb testing.TB, n int, interval time.Duration) []*Node {
 		require.NoError(tb, err)
 		replicas = append(replicas, Replica{ID: pub})
 		privs = append(privs, priv)
-		genesis.Cert.Voters = append(genesis.Cert.Voters, uint64(i))
-		genesis.Cert.Sigs = append(genesis.Cert.Sigs, ed25519.Sign(priv, genesis.Header.Hash()))
+		genesis.Cert.Sig.Voters = append(genesis.Cert.Sig.Voters, uint64(i))
+		genesis.Cert.Sig.Sigs = append(genesis.Cert.Sig.Sigs, ed25519.Sign(priv, genesis.Header.Hash()))
 	}
 
 	nodes := make([]*Node, n)

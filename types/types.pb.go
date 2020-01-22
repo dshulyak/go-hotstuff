@@ -126,6 +126,9 @@ type Proposal struct {
 	Data       *Data        `protobuf:"bytes,2,opt,name=data,proto3" json:"data,omitempty"`
 	Sig        []byte       `protobuf:"bytes,3,opt,name=sig,proto3" json:"sig,omitempty"`
 	ParentCert *Certificate `protobuf:"bytes,4,opt,name=parentCert,proto3" json:"parentCert,omitempty"`
+	// any time view change happens by timeout - there must be a timeout certificate
+	// use to sync replicas on the same block
+	Timeout *TimeoutCertificate `protobuf:"bytes,5,opt,name=timeout,proto3" json:"timeout,omitempty"`
 }
 
 func (m *Proposal) Reset()         { *m = Proposal{} }
@@ -185,6 +188,13 @@ func (m *Proposal) GetSig() []byte {
 func (m *Proposal) GetParentCert() *Certificate {
 	if m != nil {
 		return m.ParentCert
+	}
+	return nil
+}
+
+func (m *Proposal) GetTimeout() *TimeoutCertificate {
+	if m != nil {
+		return m.Timeout
 	}
 	return nil
 }
@@ -448,9 +458,8 @@ func (m *Vote) GetSig() []byte {
 }
 
 type Certificate struct {
-	Block  []byte   `protobuf:"bytes,1,opt,name=block,proto3" json:"block,omitempty"`
-	Voters []uint64 `protobuf:"varint,2,rep,packed,name=voters,proto3" json:"voters,omitempty"`
-	Sigs   [][]byte `protobuf:"bytes,3,rep,name=sigs,proto3" json:"sigs,omitempty"`
+	Block []byte               `protobuf:"bytes,1,opt,name=block,proto3" json:"block,omitempty"`
+	Sig   *AggregatedSignature `protobuf:"bytes,2,opt,name=Sig,json=sig,proto3" json:"Sig,omitempty"`
 }
 
 func (m *Certificate) Reset()         { *m = Certificate{} }
@@ -493,14 +502,111 @@ func (m *Certificate) GetBlock() []byte {
 	return nil
 }
 
-func (m *Certificate) GetVoters() []uint64 {
+func (m *Certificate) GetSig() *AggregatedSignature {
+	if m != nil {
+		return m.Sig
+	}
+	return nil
+}
+
+type TimeoutCertificate struct {
+	View uint64               `protobuf:"varint,1,opt,name=view,proto3" json:"view,omitempty"`
+	Sig  *AggregatedSignature `protobuf:"bytes,2,opt,name=Sig,json=sig,proto3" json:"Sig,omitempty"`
+}
+
+func (m *TimeoutCertificate) Reset()         { *m = TimeoutCertificate{} }
+func (m *TimeoutCertificate) String() string { return proto.CompactTextString(m) }
+func (*TimeoutCertificate) ProtoMessage()    {}
+func (*TimeoutCertificate) Descriptor() ([]byte, []int) {
+	return fileDescriptor_d938547f84707355, []int{7}
+}
+func (m *TimeoutCertificate) XXX_Unmarshal(b []byte) error {
+	return m.Unmarshal(b)
+}
+func (m *TimeoutCertificate) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	if deterministic {
+		return xxx_messageInfo_TimeoutCertificate.Marshal(b, m, deterministic)
+	} else {
+		b = b[:cap(b)]
+		n, err := m.MarshalToSizedBuffer(b)
+		if err != nil {
+			return nil, err
+		}
+		return b[:n], nil
+	}
+}
+func (m *TimeoutCertificate) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_TimeoutCertificate.Merge(m, src)
+}
+func (m *TimeoutCertificate) XXX_Size() int {
+	return m.Size()
+}
+func (m *TimeoutCertificate) XXX_DiscardUnknown() {
+	xxx_messageInfo_TimeoutCertificate.DiscardUnknown(m)
+}
+
+var xxx_messageInfo_TimeoutCertificate proto.InternalMessageInfo
+
+func (m *TimeoutCertificate) GetView() uint64 {
+	if m != nil {
+		return m.View
+	}
+	return 0
+}
+
+func (m *TimeoutCertificate) GetSig() *AggregatedSignature {
+	if m != nil {
+		return m.Sig
+	}
+	return nil
+}
+
+type AggregatedSignature struct {
+	Voters []uint64 `protobuf:"varint,1,rep,packed,name=voters,proto3" json:"voters,omitempty"`
+	Sigs   [][]byte `protobuf:"bytes,2,rep,name=sigs,proto3" json:"sigs,omitempty"`
+}
+
+func (m *AggregatedSignature) Reset()         { *m = AggregatedSignature{} }
+func (m *AggregatedSignature) String() string { return proto.CompactTextString(m) }
+func (*AggregatedSignature) ProtoMessage()    {}
+func (*AggregatedSignature) Descriptor() ([]byte, []int) {
+	return fileDescriptor_d938547f84707355, []int{8}
+}
+func (m *AggregatedSignature) XXX_Unmarshal(b []byte) error {
+	return m.Unmarshal(b)
+}
+func (m *AggregatedSignature) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	if deterministic {
+		return xxx_messageInfo_AggregatedSignature.Marshal(b, m, deterministic)
+	} else {
+		b = b[:cap(b)]
+		n, err := m.MarshalToSizedBuffer(b)
+		if err != nil {
+			return nil, err
+		}
+		return b[:n], nil
+	}
+}
+func (m *AggregatedSignature) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_AggregatedSignature.Merge(m, src)
+}
+func (m *AggregatedSignature) XXX_Size() int {
+	return m.Size()
+}
+func (m *AggregatedSignature) XXX_DiscardUnknown() {
+	xxx_messageInfo_AggregatedSignature.DiscardUnknown(m)
+}
+
+var xxx_messageInfo_AggregatedSignature proto.InternalMessageInfo
+
+func (m *AggregatedSignature) GetVoters() []uint64 {
 	if m != nil {
 		return m.Voters
 	}
 	return nil
 }
 
-func (m *Certificate) GetSigs() [][]byte {
+func (m *AggregatedSignature) GetSigs() [][]byte {
 	if m != nil {
 		return m.Sigs
 	}
@@ -515,7 +621,7 @@ func (m *Data) Reset()         { *m = Data{} }
 func (m *Data) String() string { return proto.CompactTextString(m) }
 func (*Data) ProtoMessage()    {}
 func (*Data) Descriptor() ([]byte, []int) {
-	return fileDescriptor_d938547f84707355, []int{7}
+	return fileDescriptor_d938547f84707355, []int{9}
 }
 func (m *Data) XXX_Unmarshal(b []byte) error {
 	return m.Unmarshal(b)
@@ -562,7 +668,7 @@ func (m *Transaction) Reset()         { *m = Transaction{} }
 func (m *Transaction) String() string { return proto.CompactTextString(m) }
 func (*Transaction) ProtoMessage()    {}
 func (*Transaction) Descriptor() ([]byte, []int) {
-	return fileDescriptor_d938547f84707355, []int{8}
+	return fileDescriptor_d938547f84707355, []int{10}
 }
 func (m *Transaction) XXX_Unmarshal(b []byte) error {
 	return m.Unmarshal(b)
@@ -627,6 +733,8 @@ func init() {
 	proto.RegisterType((*Header)(nil), "Header")
 	proto.RegisterType((*Vote)(nil), "Vote")
 	proto.RegisterType((*Certificate)(nil), "Certificate")
+	proto.RegisterType((*TimeoutCertificate)(nil), "TimeoutCertificate")
+	proto.RegisterType((*AggregatedSignature)(nil), "AggregatedSignature")
 	proto.RegisterType((*Data)(nil), "Data")
 	proto.RegisterType((*Transaction)(nil), "Transaction")
 }
@@ -634,36 +742,40 @@ func init() {
 func init() { proto.RegisterFile("types.proto", fileDescriptor_d938547f84707355) }
 
 var fileDescriptor_d938547f84707355 = []byte{
-	// 452 bytes of a gzipped FileDescriptorProto
-	0x1f, 0x8b, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0xff, 0xa4, 0x93, 0x31, 0x8f, 0xd3, 0x30,
-	0x14, 0xc7, 0x93, 0xc6, 0x4d, 0xca, 0x6b, 0x06, 0x64, 0xa1, 0x53, 0x00, 0x29, 0x44, 0x16, 0x12,
-	0x1d, 0x50, 0x06, 0xf8, 0x06, 0xe5, 0x86, 0x2e, 0xc0, 0xc9, 0x42, 0x27, 0x56, 0x9f, 0xef, 0x51,
-	0x22, 0x4e, 0x71, 0x14, 0x9b, 0xab, 0x18, 0x58, 0x99, 0xf9, 0x58, 0x8c, 0x37, 0x32, 0xa2, 0xf6,
-	0x8b, 0x20, 0xbf, 0x38, 0xa5, 0x48, 0xed, 0x74, 0x9b, 0xff, 0xef, 0xc5, 0xef, 0xf7, 0xfe, 0xff,
-	0xba, 0x30, 0x77, 0xdf, 0x3a, 0xb4, 0x75, 0xd7, 0x1b, 0x67, 0xc4, 0x77, 0xc8, 0xde, 0xa2, 0xb5,
-	0x6a, 0x8d, 0xfc, 0x05, 0xcc, 0xba, 0xde, 0x74, 0xc6, 0xaa, 0x9b, 0x22, 0xae, 0xe2, 0xc5, 0xfc,
-	0xd5, 0x83, 0xfa, 0x22, 0x14, 0x56, 0x91, 0xdc, 0x37, 0xf9, 0x73, 0xc8, 0x5a, 0xdc, 0xdc, 0x36,
-	0xb8, 0x29, 0x26, 0xf4, 0xdd, 0xac, 0x7e, 0x87, 0x9b, 0xcb, 0x06, 0x37, 0xab, 0x48, 0x8e, 0x2d,
-	0xfe, 0x14, 0xd8, 0xad, 0x71, 0x58, 0x24, 0xf4, 0xc9, 0xb4, 0xbe, 0x34, 0x0e, 0x57, 0x91, 0xa4,
-	0xe2, 0x32, 0x05, 0xe6, 0xb7, 0x10, 0x3f, 0x62, 0x98, 0x8d, 0x0c, 0xfe, 0x0c, 0xd2, 0xcf, 0xa8,
-	0xae, 0xb1, 0x0f, 0xf8, 0xac, 0x5e, 0x91, 0x94, 0xa1, 0xcc, 0x1f, 0x03, 0xbb, 0x56, 0x4e, 0x05,
-	0xea, 0xb4, 0x3e, 0x57, 0x4e, 0x49, 0x2a, 0xf1, 0x87, 0x90, 0xd8, 0x66, 0x4d, 0xb0, 0x5c, 0xfa,
-	0x23, 0x7f, 0x09, 0xd0, 0xa9, 0x1e, 0x5b, 0xf7, 0x06, 0x7b, 0x57, 0x30, 0xba, 0x92, 0xd7, 0x5e,
-	0x34, 0x9f, 0x1a, 0xad, 0x1c, 0xca, 0x83, 0xbe, 0x58, 0x43, 0x16, 0x3c, 0x70, 0x0e, 0x8c, 0xbc,
-	0xf9, 0x25, 0x98, 0xa4, 0x33, 0x7f, 0x04, 0x53, 0xbf, 0x77, 0x4f, 0x68, 0x26, 0x07, 0x71, 0x04,
-	0x5a, 0x01, 0xd3, 0xa7, 0x70, 0xd4, 0x11, 0x08, 0xd3, 0xe5, 0x8d, 0xd1, 0x5f, 0xee, 0xe5, 0x76,
-	0xc4, 0x24, 0x27, 0x31, 0x17, 0x90, 0x0e, 0xe3, 0x8e, 0xda, 0x39, 0x83, 0x74, 0xf0, 0x4e, 0xc3,
-	0x73, 0x19, 0x14, 0x7f, 0x02, 0x33, 0x3f, 0x5f, 0x1a, 0xe3, 0x82, 0xab, 0xbd, 0x16, 0x1f, 0x81,
-	0xf9, 0x9f, 0xd0, 0x47, 0x71, 0xe5, 0x0d, 0xd0, 0xc0, 0x5c, 0x0e, 0x62, 0x4f, 0x99, 0x1c, 0x0b,
-	0x2d, 0x39, 0x12, 0x1a, 0xdb, 0x87, 0x26, 0xde, 0xc3, 0xfc, 0xc0, 0xc0, 0x09, 0xc0, 0x19, 0xa4,
-	0x74, 0xdf, 0x16, 0x93, 0x2a, 0x59, 0x30, 0x19, 0x94, 0x07, 0xdb, 0x66, 0x6d, 0x8b, 0xa4, 0x4a,
-	0x16, 0xb9, 0xa4, 0xb3, 0x58, 0x00, 0x3b, 0x0f, 0x31, 0x51, 0x82, 0x71, 0x95, 0x50, 0x4c, 0x1f,
-	0x7a, 0xd5, 0x5a, 0xa5, 0x5d, 0x63, 0xda, 0x21, 0x48, 0xa1, 0x61, 0x7e, 0x50, 0xe4, 0x05, 0x64,
-	0x4a, 0x6b, 0xf3, 0xb5, 0x75, 0x01, 0x3e, 0x4a, 0xbf, 0x54, 0x6b, 0x5a, 0x8d, 0xe3, 0x03, 0x20,
-	0xe1, 0xe1, 0x04, 0x18, 0xb2, 0xfa, 0xef, 0x25, 0xfe, 0xf3, 0xb7, 0x2c, 0x7e, 0x6d, 0xcb, 0xf8,
-	0x6e, 0x5b, 0xc6, 0x7f, 0xb6, 0x65, 0xfc, 0x73, 0x57, 0x46, 0x77, 0xbb, 0x32, 0xfa, 0xbd, 0x2b,
-	0xa3, 0xab, 0x94, 0xfe, 0x84, 0xaf, 0xff, 0x06, 0x00, 0x00, 0xff, 0xff, 0x47, 0x82, 0xac, 0xd9,
-	0x93, 0x03, 0x00, 0x00,
+	// 516 bytes of a gzipped FileDescriptorProto
+	0x1f, 0x8b, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0xff, 0xa4, 0x54, 0xc1, 0x6e, 0xd3, 0x40,
+	0x10, 0xb5, 0xeb, 0x4d, 0x1c, 0x26, 0x3e, 0xa0, 0x6d, 0x85, 0x0c, 0x48, 0x26, 0xb2, 0x10, 0xe4,
+	0x00, 0x3e, 0xc0, 0x17, 0x34, 0xf4, 0x10, 0x09, 0x81, 0xa2, 0x6d, 0x55, 0x71, 0xdd, 0x3a, 0x83,
+	0x59, 0x51, 0xbc, 0x96, 0xbd, 0x69, 0xc4, 0x81, 0x7f, 0xe0, 0x67, 0xf8, 0x07, 0x8e, 0x3d, 0x72,
+	0x44, 0xc9, 0x8f, 0xa0, 0x1d, 0xaf, 0x43, 0x10, 0x8e, 0x84, 0xc4, 0x6d, 0xdf, 0xcc, 0xee, 0xbc,
+	0x79, 0xef, 0x25, 0x86, 0xb1, 0xf9, 0x5c, 0x61, 0x93, 0x55, 0xb5, 0x36, 0x3a, 0xfd, 0x02, 0xe1,
+	0x1b, 0x6c, 0x1a, 0x59, 0x20, 0x7f, 0x0a, 0xa3, 0xaa, 0xd6, 0x95, 0x6e, 0xe4, 0x75, 0xec, 0x4f,
+	0xfc, 0xe9, 0xf8, 0xc5, 0x9d, 0x6c, 0xe1, 0x0a, 0x73, 0x4f, 0xec, 0x9a, 0xfc, 0x31, 0x84, 0x25,
+	0xae, 0x6f, 0x14, 0xae, 0xe3, 0x23, 0xba, 0x37, 0xca, 0xde, 0xe2, 0xfa, 0x52, 0xe1, 0x7a, 0xee,
+	0x89, 0xae, 0xc5, 0x1f, 0x02, 0xbb, 0xd1, 0x06, 0xe3, 0x80, 0xae, 0x0c, 0xb2, 0x4b, 0x6d, 0x70,
+	0xee, 0x09, 0x2a, 0xce, 0x86, 0xc0, 0xec, 0x16, 0xe9, 0x37, 0x1f, 0x46, 0x1d, 0x07, 0x7f, 0x04,
+	0xc3, 0x0f, 0x28, 0x97, 0x58, 0x3b, 0xfa, 0x30, 0x9b, 0x13, 0x14, 0xae, 0xcc, 0xef, 0x03, 0x5b,
+	0x4a, 0x23, 0x1d, 0xeb, 0x20, 0x3b, 0x93, 0x46, 0x0a, 0x2a, 0xf1, 0xbb, 0x10, 0x34, 0xaa, 0x20,
+	0xb2, 0x48, 0xd8, 0x23, 0x7f, 0x06, 0x50, 0xc9, 0x1a, 0x4b, 0xf3, 0x0a, 0x6b, 0x13, 0x33, 0x7a,
+	0x12, 0x65, 0x16, 0xa8, 0xf7, 0x2a, 0x97, 0x06, 0xc5, 0x5e, 0x9f, 0x3f, 0x87, 0xd0, 0xa8, 0x4f,
+	0xa8, 0x57, 0x26, 0x1e, 0xd0, 0xd5, 0xe3, 0xec, 0xa2, 0xc5, 0xfb, 0x2f, 0xba, 0x3b, 0x69, 0x01,
+	0xa1, 0x93, 0xcc, 0x39, 0x30, 0xb2, 0xc2, 0xee, 0xcc, 0x04, 0x9d, 0xf9, 0x09, 0x0c, 0xac, 0xcc,
+	0x9a, 0x36, 0x65, 0xa2, 0x05, 0x3d, 0x3b, 0x4e, 0x80, 0xe5, 0x87, 0xb6, 0xa3, 0x4e, 0x8a, 0x30,
+	0x98, 0x5d, 0xeb, 0xfc, 0xe3, 0x7f, 0x99, 0xd3, 0xd1, 0x04, 0x07, 0x69, 0x16, 0x30, 0x6c, 0xc7,
+	0xf5, 0xca, 0xb9, 0x07, 0xc3, 0xd6, 0x2a, 0x1a, 0x1e, 0x09, 0x87, 0xf8, 0x03, 0x18, 0xd9, 0xf9,
+	0x42, 0x6b, 0xe3, 0x54, 0xed, 0x70, 0xfa, 0x0e, 0x98, 0x4d, 0xdc, 0x5a, 0x71, 0x65, 0x05, 0xd0,
+	0xc0, 0x48, 0xb4, 0x60, 0xc7, 0x72, 0xd4, 0x67, 0x5a, 0xd0, 0x63, 0x1a, 0xdb, 0x99, 0x96, 0xbe,
+	0x86, 0xf1, 0x9e, 0x80, 0x03, 0x04, 0x4f, 0x20, 0x38, 0x57, 0x85, 0x33, 0xe3, 0x24, 0x3b, 0x2d,
+	0x8a, 0x1a, 0x0b, 0x69, 0x70, 0x79, 0xae, 0x8a, 0x52, 0x9a, 0x55, 0x8d, 0xed, 0xb0, 0x05, 0xf0,
+	0xbf, 0x73, 0xee, 0x35, 0xe1, 0x5f, 0x27, 0x9e, 0xc2, 0x71, 0x4f, 0xcf, 0x7a, 0x48, 0x82, 0x9a,
+	0xd8, 0x9f, 0x04, 0x53, 0x26, 0x1c, 0xb2, 0x54, 0x8d, 0x2a, 0x9a, 0xf8, 0x68, 0x12, 0x4c, 0x23,
+	0x41, 0xe7, 0x74, 0x0a, 0xec, 0xcc, 0xe5, 0x46, 0x91, 0xda, 0x17, 0x36, 0xb7, 0x8b, 0x5a, 0x96,
+	0x8d, 0xcc, 0x8d, 0xd2, 0x65, 0x9b, 0x6c, 0x9a, 0xc3, 0x78, 0xaf, 0xc8, 0x63, 0x08, 0x65, 0x9e,
+	0xeb, 0x55, 0x69, 0x9c, 0x1b, 0x1d, 0xb4, 0x2e, 0x95, 0xba, 0xcc, 0xb1, 0xfb, 0x45, 0x12, 0xb0,
+	0xe4, 0x44, 0xd0, 0x86, 0xf7, 0xc7, 0x3f, 0xe9, 0xb7, 0xe1, 0xb3, 0xf8, 0xfb, 0x26, 0xf1, 0x6f,
+	0x37, 0x89, 0xff, 0x73, 0x93, 0xf8, 0x5f, 0xb7, 0x89, 0x77, 0xbb, 0x4d, 0xbc, 0x1f, 0xdb, 0xc4,
+	0xbb, 0x1a, 0xd2, 0x47, 0xe4, 0xe5, 0xaf, 0x00, 0x00, 0x00, 0xff, 0xff, 0x9c, 0x3b, 0x98, 0x7b,
+	0x53, 0x04, 0x00, 0x00,
 }
 
 func (m *Message) Marshal() (dAtA []byte, err error) {
@@ -781,6 +893,18 @@ func (m *Proposal) MarshalToSizedBuffer(dAtA []byte) (int, error) {
 	_ = i
 	var l int
 	_ = l
+	if m.Timeout != nil {
+		{
+			size, err := m.Timeout.MarshalToSizedBuffer(dAtA[:i])
+			if err != nil {
+				return 0, err
+			}
+			i -= size
+			i = encodeVarintTypes(dAtA, i, uint64(size))
+		}
+		i--
+		dAtA[i] = 0x2a
+	}
 	if m.ParentCert != nil {
 		{
 			size, err := m.ParentCert.MarshalToSizedBuffer(dAtA[:i])
@@ -1047,30 +1171,15 @@ func (m *Certificate) MarshalToSizedBuffer(dAtA []byte) (int, error) {
 	_ = i
 	var l int
 	_ = l
-	if len(m.Sigs) > 0 {
-		for iNdEx := len(m.Sigs) - 1; iNdEx >= 0; iNdEx-- {
-			i -= len(m.Sigs[iNdEx])
-			copy(dAtA[i:], m.Sigs[iNdEx])
-			i = encodeVarintTypes(dAtA, i, uint64(len(m.Sigs[iNdEx])))
-			i--
-			dAtA[i] = 0x1a
-		}
-	}
-	if len(m.Voters) > 0 {
-		dAtA12 := make([]byte, len(m.Voters)*10)
-		var j11 int
-		for _, num := range m.Voters {
-			for num >= 1<<7 {
-				dAtA12[j11] = uint8(uint64(num)&0x7f | 0x80)
-				num >>= 7
-				j11++
+	if m.Sig != nil {
+		{
+			size, err := m.Sig.MarshalToSizedBuffer(dAtA[:i])
+			if err != nil {
+				return 0, err
 			}
-			dAtA12[j11] = uint8(num)
-			j11++
+			i -= size
+			i = encodeVarintTypes(dAtA, i, uint64(size))
 		}
-		i -= j11
-		copy(dAtA[i:], dAtA12[:j11])
-		i = encodeVarintTypes(dAtA, i, uint64(j11))
 		i--
 		dAtA[i] = 0x12
 	}
@@ -1078,6 +1187,96 @@ func (m *Certificate) MarshalToSizedBuffer(dAtA []byte) (int, error) {
 		i -= len(m.Block)
 		copy(dAtA[i:], m.Block)
 		i = encodeVarintTypes(dAtA, i, uint64(len(m.Block)))
+		i--
+		dAtA[i] = 0xa
+	}
+	return len(dAtA) - i, nil
+}
+
+func (m *TimeoutCertificate) Marshal() (dAtA []byte, err error) {
+	size := m.Size()
+	dAtA = make([]byte, size)
+	n, err := m.MarshalToSizedBuffer(dAtA[:size])
+	if err != nil {
+		return nil, err
+	}
+	return dAtA[:n], nil
+}
+
+func (m *TimeoutCertificate) MarshalTo(dAtA []byte) (int, error) {
+	size := m.Size()
+	return m.MarshalToSizedBuffer(dAtA[:size])
+}
+
+func (m *TimeoutCertificate) MarshalToSizedBuffer(dAtA []byte) (int, error) {
+	i := len(dAtA)
+	_ = i
+	var l int
+	_ = l
+	if m.Sig != nil {
+		{
+			size, err := m.Sig.MarshalToSizedBuffer(dAtA[:i])
+			if err != nil {
+				return 0, err
+			}
+			i -= size
+			i = encodeVarintTypes(dAtA, i, uint64(size))
+		}
+		i--
+		dAtA[i] = 0x12
+	}
+	if m.View != 0 {
+		i = encodeVarintTypes(dAtA, i, uint64(m.View))
+		i--
+		dAtA[i] = 0x8
+	}
+	return len(dAtA) - i, nil
+}
+
+func (m *AggregatedSignature) Marshal() (dAtA []byte, err error) {
+	size := m.Size()
+	dAtA = make([]byte, size)
+	n, err := m.MarshalToSizedBuffer(dAtA[:size])
+	if err != nil {
+		return nil, err
+	}
+	return dAtA[:n], nil
+}
+
+func (m *AggregatedSignature) MarshalTo(dAtA []byte) (int, error) {
+	size := m.Size()
+	return m.MarshalToSizedBuffer(dAtA[:size])
+}
+
+func (m *AggregatedSignature) MarshalToSizedBuffer(dAtA []byte) (int, error) {
+	i := len(dAtA)
+	_ = i
+	var l int
+	_ = l
+	if len(m.Sigs) > 0 {
+		for iNdEx := len(m.Sigs) - 1; iNdEx >= 0; iNdEx-- {
+			i -= len(m.Sigs[iNdEx])
+			copy(dAtA[i:], m.Sigs[iNdEx])
+			i = encodeVarintTypes(dAtA, i, uint64(len(m.Sigs[iNdEx])))
+			i--
+			dAtA[i] = 0x12
+		}
+	}
+	if len(m.Voters) > 0 {
+		dAtA15 := make([]byte, len(m.Voters)*10)
+		var j14 int
+		for _, num := range m.Voters {
+			for num >= 1<<7 {
+				dAtA15[j14] = uint8(uint64(num)&0x7f | 0x80)
+				num >>= 7
+				j14++
+			}
+			dAtA15[j14] = uint8(num)
+			j14++
+		}
+		i -= j14
+		copy(dAtA[i:], dAtA15[:j14])
+		i = encodeVarintTypes(dAtA, i, uint64(j14))
 		i--
 		dAtA[i] = 0xa
 	}
@@ -1251,6 +1450,10 @@ func (m *Proposal) Size() (n int) {
 		l = m.ParentCert.Size()
 		n += 1 + l + sovTypes(uint64(l))
 	}
+	if m.Timeout != nil {
+		l = m.Timeout.Size()
+		n += 1 + l + sovTypes(uint64(l))
+	}
 	return n
 }
 
@@ -1351,6 +1554,35 @@ func (m *Certificate) Size() (n int) {
 	if l > 0 {
 		n += 1 + l + sovTypes(uint64(l))
 	}
+	if m.Sig != nil {
+		l = m.Sig.Size()
+		n += 1 + l + sovTypes(uint64(l))
+	}
+	return n
+}
+
+func (m *TimeoutCertificate) Size() (n int) {
+	if m == nil {
+		return 0
+	}
+	var l int
+	_ = l
+	if m.View != 0 {
+		n += 1 + sovTypes(uint64(m.View))
+	}
+	if m.Sig != nil {
+		l = m.Sig.Size()
+		n += 1 + l + sovTypes(uint64(l))
+	}
+	return n
+}
+
+func (m *AggregatedSignature) Size() (n int) {
+	if m == nil {
+		return 0
+	}
+	var l int
+	_ = l
 	if len(m.Voters) > 0 {
 		l = 0
 		for _, e := range m.Voters {
@@ -1738,6 +1970,42 @@ func (m *Proposal) Unmarshal(dAtA []byte) error {
 				m.ParentCert = &Certificate{}
 			}
 			if err := m.ParentCert.Unmarshal(dAtA[iNdEx:postIndex]); err != nil {
+				return err
+			}
+			iNdEx = postIndex
+		case 5:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Timeout", wireType)
+			}
+			var msglen int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTypes
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				msglen |= int(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			if msglen < 0 {
+				return ErrInvalidLengthTypes
+			}
+			postIndex := iNdEx + msglen
+			if postIndex < 0 {
+				return ErrInvalidLengthTypes
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			if m.Timeout == nil {
+				m.Timeout = &TimeoutCertificate{}
+			}
+			if err := m.Timeout.Unmarshal(dAtA[iNdEx:postIndex]); err != nil {
 				return err
 			}
 			iNdEx = postIndex
@@ -2450,6 +2718,203 @@ func (m *Certificate) Unmarshal(dAtA []byte) error {
 			}
 			iNdEx = postIndex
 		case 2:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Sig", wireType)
+			}
+			var msglen int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTypes
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				msglen |= int(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			if msglen < 0 {
+				return ErrInvalidLengthTypes
+			}
+			postIndex := iNdEx + msglen
+			if postIndex < 0 {
+				return ErrInvalidLengthTypes
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			if m.Sig == nil {
+				m.Sig = &AggregatedSignature{}
+			}
+			if err := m.Sig.Unmarshal(dAtA[iNdEx:postIndex]); err != nil {
+				return err
+			}
+			iNdEx = postIndex
+		default:
+			iNdEx = preIndex
+			skippy, err := skipTypes(dAtA[iNdEx:])
+			if err != nil {
+				return err
+			}
+			if skippy < 0 {
+				return ErrInvalidLengthTypes
+			}
+			if (iNdEx + skippy) < 0 {
+				return ErrInvalidLengthTypes
+			}
+			if (iNdEx + skippy) > l {
+				return io.ErrUnexpectedEOF
+			}
+			iNdEx += skippy
+		}
+	}
+
+	if iNdEx > l {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
+func (m *TimeoutCertificate) Unmarshal(dAtA []byte) error {
+	l := len(dAtA)
+	iNdEx := 0
+	for iNdEx < l {
+		preIndex := iNdEx
+		var wire uint64
+		for shift := uint(0); ; shift += 7 {
+			if shift >= 64 {
+				return ErrIntOverflowTypes
+			}
+			if iNdEx >= l {
+				return io.ErrUnexpectedEOF
+			}
+			b := dAtA[iNdEx]
+			iNdEx++
+			wire |= uint64(b&0x7F) << shift
+			if b < 0x80 {
+				break
+			}
+		}
+		fieldNum := int32(wire >> 3)
+		wireType := int(wire & 0x7)
+		if wireType == 4 {
+			return fmt.Errorf("proto: TimeoutCertificate: wiretype end group for non-group")
+		}
+		if fieldNum <= 0 {
+			return fmt.Errorf("proto: TimeoutCertificate: illegal tag %d (wire type %d)", fieldNum, wire)
+		}
+		switch fieldNum {
+		case 1:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field View", wireType)
+			}
+			m.View = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTypes
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.View |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 2:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Sig", wireType)
+			}
+			var msglen int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTypes
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				msglen |= int(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			if msglen < 0 {
+				return ErrInvalidLengthTypes
+			}
+			postIndex := iNdEx + msglen
+			if postIndex < 0 {
+				return ErrInvalidLengthTypes
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			if m.Sig == nil {
+				m.Sig = &AggregatedSignature{}
+			}
+			if err := m.Sig.Unmarshal(dAtA[iNdEx:postIndex]); err != nil {
+				return err
+			}
+			iNdEx = postIndex
+		default:
+			iNdEx = preIndex
+			skippy, err := skipTypes(dAtA[iNdEx:])
+			if err != nil {
+				return err
+			}
+			if skippy < 0 {
+				return ErrInvalidLengthTypes
+			}
+			if (iNdEx + skippy) < 0 {
+				return ErrInvalidLengthTypes
+			}
+			if (iNdEx + skippy) > l {
+				return io.ErrUnexpectedEOF
+			}
+			iNdEx += skippy
+		}
+	}
+
+	if iNdEx > l {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
+func (m *AggregatedSignature) Unmarshal(dAtA []byte) error {
+	l := len(dAtA)
+	iNdEx := 0
+	for iNdEx < l {
+		preIndex := iNdEx
+		var wire uint64
+		for shift := uint(0); ; shift += 7 {
+			if shift >= 64 {
+				return ErrIntOverflowTypes
+			}
+			if iNdEx >= l {
+				return io.ErrUnexpectedEOF
+			}
+			b := dAtA[iNdEx]
+			iNdEx++
+			wire |= uint64(b&0x7F) << shift
+			if b < 0x80 {
+				break
+			}
+		}
+		fieldNum := int32(wire >> 3)
+		wireType := int(wire & 0x7)
+		if wireType == 4 {
+			return fmt.Errorf("proto: AggregatedSignature: wiretype end group for non-group")
+		}
+		if fieldNum <= 0 {
+			return fmt.Errorf("proto: AggregatedSignature: illegal tag %d (wire type %d)", fieldNum, wire)
+		}
+		switch fieldNum {
+		case 1:
 			if wireType == 0 {
 				var v uint64
 				for shift := uint(0); ; shift += 7 {
@@ -2525,7 +2990,7 @@ func (m *Certificate) Unmarshal(dAtA []byte) error {
 			} else {
 				return fmt.Errorf("proto: wrong wireType = %d for field Voters", wireType)
 			}
-		case 3:
+		case 2:
 			if wireType != 2 {
 				return fmt.Errorf("proto: wrong wireType = %d for field Sigs", wireType)
 			}

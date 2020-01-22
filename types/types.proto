@@ -14,6 +14,9 @@ message Proposal {
         Data data = 2;
         bytes sig = 3;
         Certificate parentCert = 4;
+        // any time view change happens by timeout - there must be a timeout certificate
+        // use to sync replicas on the same block
+        TimeoutCertificate timeout = 5;
 }
 
 message NewView {
@@ -46,8 +49,17 @@ message Vote {
 
 message Certificate {
         bytes block = 1;
-        repeated uint64 voters = 2;
-        repeated bytes sigs = 3; // TODO will be replaced with single aggregated signature
+        AggregatedSignature Sig = 2; // TODO will be replaced with single aggregated signature
+}
+
+message TimeoutCertificate {
+        uint64 view = 1;
+        AggregatedSignature Sig = 2;
+}
+
+message AggregatedSignature {
+        repeated uint64 voters = 1;
+        repeated bytes sigs = 2;
 }
 
 message Data {

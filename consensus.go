@@ -13,9 +13,9 @@ type Signer interface {
 }
 
 type Verifier interface {
-	VerifyCert(*types.Certificate) bool
+	VerifyCert([]byte, *types.AggregatedSignature) bool
 	VerifySingle(uint64, []byte, []byte) bool
-	Merge(*types.Certificate, *types.Vote)
+	Merge(*types.AggregatedSignature, uint64, []byte)
 }
 
 func newConsensus(
@@ -94,6 +94,8 @@ type consensus struct {
 	voted                   uint64 // last voted view. must be persisted to ensure no accidental double vote on the same view
 	prepare, locked, commit *types.Header
 	prepareCert             *types.Certificate // prepareCert always updated to highest known certificate
+	// TODO should it be persisted? can it help with synchronization after restart?
+	timeoutCert *types.TimeoutCertificate
 
 	// maybe instead Progress should be returned by each public method
 	Progress Progress
@@ -120,6 +122,7 @@ func (c *consensus) Send(root []byte, data *types.Data) {
 			Header:     header,
 			Data:       data,
 			ParentCert: c.prepareCert,
+			Timeout:    c.timeoutCert,
 			Sig:        c.signer.Sign(nil, header.Hash()),
 		}
 		c.vlog.Debug("sending proposal",
@@ -183,6 +186,11 @@ func (c *consensus) nextRound(timedout bool) {
 		zap.Int("view timeout", c.timeout),
 		zap.Bool("timedout", timedout))
 
+	// release timeout certificate once it is useless
+	if c.timeoutCert != nil && c.timeoutCert.View < c.view-1 {
+		c.timeoutCert = nil
+	}
+
 	// timeouts will be collected for two rounds, before leadership and the round when replica is a leader
 	if c.id == c.getLeader(c.view-1) {
 		c.timeouts.Reset()
@@ -213,11 +221,16 @@ func (c *consensus) onProposal(msg *types.Proposal) {
 		zap.Binary("parent", msg.Header.Parent))
 
 	log.Debug("received proposal")
+
+	if msg.ParentCert == nil {
+		return
+	}
+
 	if bytes.Compare(msg.Header.Parent, msg.ParentCert.Block) != 0 {
 		return
 	}
 
-	if !c.verifier.VerifyCert(msg.ParentCert) {
+	if !c.verifier.VerifyCert(msg.Header.Parent, msg.ParentCert.Sig) {
 		log.Debug("certificate is invalid")
 		return
 	}
@@ -228,25 +241,21 @@ func (c *consensus) onProposal(msg *types.Proposal) {
 		return
 	}
 
+	if msg.Timeout != nil {
+		if !c.verifier.VerifyCert(HashSum(EncodeUint64(msg.Header.View-1)), msg.Timeout.Sig) {
+			return
+		}
+	}
+
 	leader := c.getLeader(msg.Header.View)
 	if !c.verifier.VerifySingle(leader, msg.Header.Hash(), msg.Sig) {
 		log.Debug("proposal is not signed correctly", zap.Uint64("signer", leader))
 		return
 	}
 
-	// TODO this needs to be incorporated into updatePrepare routine after timeout certificate is added
-	update := parent.View > c.prepare.View
 	c.updatePrepare(parent, msg.ParentCert)
-	if update {
-		c.view = msg.Header.View
-		c.nextRound(false)
-	}
+	c.syncView(parent, msg.ParentCert, msg.Timeout)
 	c.update(msg.Header, msg.ParentCert)
-
-	// this condition is not in the spec
-	// but if 2f+1 replicas will sign byzantine block with view set to MaxUint64
-	// protocol won't be able to make progress anymore
-	// TODO this needs to be enabled when timeout certificate will be introduced
 
 	if msg.Header.View != c.view {
 		log.Debug("proposal view doesn't match local view")
@@ -377,12 +386,23 @@ func (c *consensus) updatePrepare(header *types.Header, cert *types.Certificate)
 		if err != nil {
 			c.vlog.Fatal("failed to set prepare tag", zap.Error(err))
 		}
+		c.Progress.AddHeader(header, false)
+	}
+}
+
+func (c *consensus) syncView(header *types.Header, cert *types.Certificate, tcert *types.TimeoutCertificate) {
+	if tcert == nil && header.View >= c.view {
 		c.view = header.View + 1
-		err = c.store.SaveView(c.view)
-		if err != nil {
+		if err := c.store.SaveView(c.view); err != nil {
 			c.vlog.Fatal("failed to store view", zap.Error(err))
 		}
-		c.Progress.AddHeader(header, false)
+		c.nextRound(false)
+	} else if tcert != nil && tcert.View >= c.view {
+		c.view = tcert.View + 1
+		if err := c.store.SaveView(c.view); err != nil {
+			c.vlog.Fatal("failed to store view", zap.Error(err))
+		}
+		c.nextRound(false)
 	}
 }
 
@@ -441,6 +461,7 @@ func (c *consensus) onVote(vote *types.Vote) {
 		)
 	}
 	c.updatePrepare(c.votes.Header, c.votes.Cert)
+	c.syncView(c.votes.Header, c.votes.Cert, nil)
 	c.nextRound(false)
 }
 
@@ -461,19 +482,6 @@ func (c *consensus) onNewView(msg *types.NewView) {
 		return
 	}
 
-	/*TODO there should be two types of certificates
-		regular progress certificate, collected from votes
-		timeout certificate, collected from signature on new-views
-		without timeout certificate consensus will have to wait additional time to make progress
-
-	Example:
-		after collecting new-view for view 4 with highest cert view 2
-		replicas that are aware of highest cert view 1 will reset its view to 3 (based on received progress certificate)
-		but they will not vote for this round as they already "voted" on timeout for round 4
-		they will not vote in round 3 and 4 since they already have voted=4
-		only after entering round 5 they will send new-view, and respond to a proposal for round 6, because
-		round won't be reset since all replicas have highest available qc
-	*/
 	c.updatePrepare(header, msg.Cert)
 	if !c.timeouts.Collect(msg) {
 		return
@@ -482,6 +490,8 @@ func (c *consensus) onNewView(msg *types.NewView) {
 	c.vlog.Debug("collected enough new-views to propose a block",
 		zap.Uint64("timedout view", msg.View))
 
+	c.syncView(c.prepare, c.prepareCert, c.timeouts.Cert)
+	c.timeoutCert = c.timeouts.Cert
 	if c.view == msg.View {
 		c.nextRound(false)
 	} else {

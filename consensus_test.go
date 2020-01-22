@@ -18,6 +18,7 @@ func randGenesis() *types.Block {
 		Header: header,
 		Cert: &types.Certificate{
 			Block: header.Hash(),
+			Sig:   &types.AggregatedSignature{},
 		},
 		Data: &types.Data{},
 	}
@@ -54,8 +55,8 @@ func setupTestNodes(tb testing.TB, n int) map[uint64]*testNode {
 		verifier := crypto.NewEd25519Verifier(2*len(pubs)/3+1, pubs)
 		//cons := newConsensus(nil, store, signer, verifier, id, replicas)
 		sig := signer.Sign(nil, genesis.Header.Hash())
-		genesis.Cert.Voters = append(genesis.Cert.Voters, id)
-		genesis.Cert.Sigs = append(genesis.Cert.Sigs, sig)
+		genesis.Cert.Sig.Voters = append(genesis.Cert.Sig.Voters, id)
+		genesis.Cert.Sig.Sigs = append(genesis.Cert.Sig.Sigs, sig)
 		nodes[id] = &testNode{
 			ID:       id,
 			Signer:   signer,
@@ -121,7 +122,7 @@ func TestConsensusErrorFreeQuorumProgress(t *testing.T) {
 		nodes[leader].Consensus.Step(v.Message)
 	}
 	// once collected replica will transition to new view and will wait for a data for new block
-	require.True(t, nodes[leader].Consensus.Progress.WaitingData)
+	require.True(t, nodes[leader].Consensus.Progress.WaitingData, "replica %d must be waiting for data", leader)
 }
 
 func TestConsensusTimeoutsProgress(t *testing.T) {

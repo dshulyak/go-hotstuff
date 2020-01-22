@@ -30,10 +30,10 @@ func (v *Ed25519Verifier) VerifySingle(idx uint64, msg, sig []byte) bool {
 	return ed25519.Verify(pub, msg, sig)
 }
 
-func (v *Ed25519Verifier) VerifyCert(cert *types.Certificate) bool {
+func (v *Ed25519Verifier) VerifyCert(msg []byte, sig *types.AggregatedSignature) bool {
 	count := 0
-	for i, idx := range cert.Voters {
-		valid := v.VerifySingle(idx, cert.Block, cert.Sigs[i])
+	for i, idx := range sig.Voters {
+		valid := v.VerifySingle(idx, msg, sig.Sigs[i])
 		if !valid {
 			return false
 		}
@@ -42,7 +42,7 @@ func (v *Ed25519Verifier) VerifyCert(cert *types.Certificate) bool {
 	return count >= v.threshold
 }
 
-func (v *Ed25519Verifier) Merge(cert *types.Certificate, vote *types.Vote) {
-	cert.Voters = append(cert.Voters, vote.Voter)
-	cert.Sigs = append(cert.Sigs, vote.Sig)
+func (v *Ed25519Verifier) Merge(asig *types.AggregatedSignature, voter uint64, sig []byte) {
+	asig.Voters = append(asig.Voters, voter)
+	asig.Sigs = append(asig.Sigs, sig)
 }
