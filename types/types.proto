@@ -39,8 +39,9 @@ message Header {
 // Vote should be naturally aggregated into the certificate.
 message Vote {
         bytes block = 1;
-        uint64 voter = 2;
-        bytes sig = 3;
+        uint64 view = 2;
+        uint64 voter = 3;
+        bytes sig = 4;
 }
 
 message Certificate {

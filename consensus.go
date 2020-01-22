@@ -52,7 +52,7 @@ func newConsensus(
 		logger.Fatal("failed to load prepare certificate", zap.Error(err))
 	}
 	return &consensus{
-		logger:      logger,
+		log:         logger,
 		store:       store,
 		signer:      signer,
 		verifier:    verifier,
@@ -70,8 +70,9 @@ func newConsensus(
 }
 
 type consensus struct {
-	logger *zap.Logger
-	store  *BlockStore
+	log, vlog *zap.Logger
+
+	store *BlockStore
 
 	// signer and verifier are done this way to remove all public key references from consensus logic
 	// uint64 refers to validator's public key in sorted set of validators keys
@@ -121,14 +122,12 @@ func (c *consensus) Send(root []byte, data *types.Data) {
 			ParentCert: c.prepareCert,
 			Sig:        c.signer.Sign(nil, header.Hash()),
 		}
-		c.logger.Debug("sending proposal",
-			zap.Uint64("view", c.view),
+		c.vlog.Debug("sending proposal",
 			zap.Binary("hash", header.Hash()),
 			zap.Binary("parent", header.Parent),
 			zap.Uint64("signer", c.id))
-		msg := NewProposalMsg(proposal)
-		c.Progress.AddMessage(msg)
-		c.Step(msg)
+
+		c.sendMsg(NewProposalMsg(proposal))
 	}
 }
 
@@ -143,6 +142,18 @@ func (c *consensus) Step(msg *types.Message) {
 	}
 }
 
+func (c *consensus) sendMsg(msg *types.Message, ids ...uint64) {
+	c.Progress.AddMessage(msg, ids...)
+	if ids == nil {
+		c.Step(msg)
+	}
+	for _, id := range ids {
+		if c.id == id {
+			c.Step(msg)
+		}
+	}
+}
+
 func (c *consensus) Start() {
 	c.nextRound(false)
 }
@@ -151,7 +162,7 @@ func (c *consensus) onTimeout() {
 	c.view++
 	err := c.store.SaveView(c.view)
 	if err != nil {
-		c.logger.Fatal("can't update view", zap.Error(err))
+		c.vlog.Fatal("can't update view", zap.Error(err))
 	}
 	c.nextRound(true)
 }
@@ -162,13 +173,13 @@ func (c *consensus) resetTimeout() {
 }
 
 func (c *consensus) nextRound(timedout bool) {
-	logger := c.logger.With(zap.Uint64("view", c.view))
+	c.vlog = c.log.With(zap.Uint64("CURRENT VIEW", c.view))
 
 	c.resetTimeout()
 	c.waitingData = false
 	c.votes.Reset()
 
-	logger.Debug("entered new view",
+	c.vlog.Debug("entered new view",
 		zap.Int("view timeout", c.timeout),
 		zap.Bool("timedout", timedout))
 
@@ -178,90 +189,67 @@ func (c *consensus) nextRound(timedout bool) {
 	}
 	// if this replica is a leader for next view start collecting new view messages
 	if c.id == c.getLeader(c.view+1) {
-		logger.Debug("collecting new-view messages", zap.Uint64("for view", c.view+1))
+		c.vlog.Debug("replica is a leader for next view. collecting new-view messages")
+
 		c.timeouts.Reset()
 		c.timeouts.Start(c.view)
 	}
 
-	leader := c.getLeader(c.view)
 	if timedout && c.view-1 > c.voted {
-		nview := &types.NewView{
-			Voter: c.id,
-			View:  c.view - 1,
-			Cert:  c.prepareCert,
-			// TODO prehash encoded uint
-			Sig: c.signer.Sign(nil, EncodeUint64(c.view-1)),
-		}
-		c.voted = c.view - 1
-		err := c.store.SaveVoted(c.voted)
-		if err != nil {
-			c.logger.Fatal("can't save voted", zap.Error(err))
-		}
-		logger.Debug("sending new-view", zap.Uint64("previous", nview.View), zap.Uint64("leader", leader))
-		msg := NewViewMsg(nview)
-		c.Progress.AddMessage(msg, leader)
-		if c.id == leader {
-			c.Step(msg)
-		}
-	} else if leader == c.id {
-		logger.Debug("replica is a leader for this round. waiting for data")
+		c.sendNewView()
+	} else if c.id == c.getLeader(c.view) {
+		c.vlog.Debug("replica is a leader for this view. waiting for data")
 		c.waitingData = true
 		c.Progress.WaitingData = true
 	}
 }
 
 func (c *consensus) onProposal(msg *types.Proposal) {
-	logger := c.logger.With(
+	log := c.vlog.With(
 		zap.String("msg", "proposal"),
-		zap.Uint64("view", c.view),
 		zap.Uint64("header view", msg.Header.View),
 		zap.Uint64("prepare view", c.prepare.View),
 		zap.Binary("hash", msg.Header.Hash()),
 		zap.Binary("parent", msg.Header.Parent))
 
-	logger.Debug("received proposal")
+	log.Debug("received proposal")
 	if bytes.Compare(msg.Header.Parent, msg.ParentCert.Block) != 0 {
 		return
 	}
-	// verify that parent certificate has enough unique votes
+
 	if !c.verifier.VerifyCert(msg.ParentCert) {
-		logger.Debug("certificate is invalid")
+		log.Debug("certificate is invalid")
 		return
 	}
 	parent, err := c.store.GetHeader(msg.ParentCert.Block)
 	if err != nil {
-		logger.Debug("header for parent is not found", zap.Error(err))
+		log.Debug("header for parent is not found", zap.Error(err))
+		// TODO if certified block is not found we need to sync with another node
 		return
 	}
-	// TODO this needs to be incorporated into updatePrepare routine
-	// if chain is extended we need to enter new round after proposal
+
+	leader := c.getLeader(msg.Header.View)
+	if !c.verifier.VerifySingle(leader, msg.Header.Hash(), msg.Sig) {
+		log.Debug("proposal is not signed correctly", zap.Uint64("signer", leader))
+		return
+	}
+
+	// TODO this needs to be incorporated into updatePrepare routine after timeout certificate is added
 	update := parent.View > c.prepare.View
 	c.updatePrepare(parent, msg.ParentCert)
 	if update {
 		c.view = msg.Header.View
 		c.nextRound(false)
 	}
+	c.update(msg.Header, msg.ParentCert)
 
 	// this condition is not in the spec
 	// but if 2f+1 replicas will sign byzantine block with view set to MaxUint64
 	// protocol won't be able to make progress anymore
 	// TODO this needs to be enabled when timeout certificate will be introduced
-	/*
-		if msg.Header.View != c.view {
-			logger.Debug("proposal view doesn't match local view",
-		    zap.Uint64("local", c.view))
-			return
-		}
-	*/
-	if bytes.Compare(msg.Header.Parent, msg.ParentCert.Block) != 0 {
-		logger.Debug("proposal parent doesn't match provided certificate")
-		return
-	}
-	leader := c.getLeader(msg.Header.View)
-	// TODO log verification errors
-	// validate that a proposal received from an expected leader for this round
-	if !c.verifier.VerifySingle(leader, msg.Header.Hash(), msg.Sig) {
-		logger.Debug("proposal is not signed correctly", zap.Uint64("signer", leader))
+
+	if msg.Header.View != c.view {
+		log.Debug("proposal view doesn't match local view")
 		return
 	}
 
@@ -270,29 +258,52 @@ func (c *consensus) onProposal(msg *types.Proposal) {
 	// everything after this comment should be done after receiving ack from app state machine
 
 	if msg.Header.View > c.voted && c.safeNode(msg.Header, msg.ParentCert) {
-		logger.Debug("proposal is safe to vote on")
-		hash := msg.Header.Hash()
-		// TODO header and data for proposal must be tracked, as they can be pruned from store
-		// e.g. add a separate bucket for tracking non-finalized blocks
-		// remove from that bucket when block is commited
-		// in background run a thread that will clear blocks that are in that bucket with a height <= commited hight
-		err := c.store.SaveHeader(msg.Header)
-		if err != nil {
-			c.logger.Fatal("can't save a header", zap.Error(err))
-		}
-		err = c.store.SaveData(hash, msg.Data)
-		if err != nil {
-			logger.Fatal("can't save a block data", zap.Error(err))
-		}
-
-		err = c.store.SaveCertificate(msg.ParentCert)
-		if err != nil {
-			logger.Fatal("can't save a certificate", zap.Error(err))
-		}
-
+		log.Debug("proposal is safe to vote on")
+		c.persistProposal(msg)
 		c.sendVote(msg.Header)
 	}
-	c.update(msg.Header, msg.ParentCert)
+}
+
+func (c *consensus) persistProposal(msg *types.Proposal) {
+	hash := msg.Header.Hash()
+	// TODO header and data for proposal must be tracked, as they can be pruned from store
+	// e.g. add a separate bucket for tracking non-finalized blocks
+	// remove from that bucket when block is commited
+	// in background run a thread that will clear blocks that are in that bucket with a height <= commited hight
+	err := c.store.SaveHeader(msg.Header)
+	if err != nil {
+		c.vlog.Fatal("can't save a header", zap.Error(err))
+	}
+	err = c.store.SaveData(hash, msg.Data)
+	if err != nil {
+		c.vlog.Fatal("can't save a block data", zap.Error(err))
+	}
+
+	err = c.store.SaveCertificate(msg.ParentCert)
+	if err != nil {
+		c.vlog.Fatal("can't save a certificate", zap.Error(err))
+	}
+}
+
+func (c *consensus) sendNewView() {
+	// send new-view to the leader of this round.
+
+	leader := c.getLeader(c.view)
+	nview := &types.NewView{
+		Voter: c.id,
+		View:  c.view - 1,
+		Cert:  c.prepareCert,
+		// TODO prehash encoded uint
+		Sig: c.signer.Sign(nil, EncodeUint64(c.view-1)),
+	}
+	c.voted = c.view - 1
+	err := c.store.SaveVoted(c.voted)
+	if err != nil {
+		c.vlog.Fatal("can't save voted", zap.Error(err))
+	}
+
+	c.vlog.Debug("sending new-view", zap.Uint64("previous view", nview.View), zap.Uint64("leader", leader))
+	c.sendMsg(NewViewMsg(nview), leader)
 }
 
 func (c *consensus) sendVote(header *types.Header) {
@@ -301,23 +312,19 @@ func (c *consensus) sendVote(header *types.Header) {
 	c.voted = header.View
 	err := c.store.SaveVoted(c.voted)
 	if err != nil {
-		c.logger.Fatal("can't save voted", zap.Error(err))
+		c.vlog.Fatal("can't save voted", zap.Error(err))
 	}
 
 	c.votes.Start(header)
 
 	vote := &types.Vote{
 		Block: hash,
+		View:  header.View,
 		Voter: c.id,
 		Sig:   c.signer.Sign(nil, hash),
 	}
 
-	leader := c.getLeader(c.view + 1)
-	msg := NewVoteMsg(vote)
-	c.Progress.AddMessage(msg, leader)
-	if c.id == leader {
-		c.Step(msg)
-	}
+	c.sendMsg(NewVoteMsg(vote), c.getLeader(vote.View+1))
 }
 
 func (c *consensus) update(header *types.Header, cert *types.Certificate) {
@@ -339,20 +346,20 @@ func (c *consensus) update(header *types.Header, cert *types.Certificate) {
 
 	// 2-chain locked, gaps are allowed
 	if gparent.View > c.locked.View {
-		c.logger.Debug("new block locked", zap.Uint64("view", gparent.View), zap.Binary("hash", gparent.Hash()))
+		c.vlog.Debug("new block locked", zap.Uint64("view", gparent.View), zap.Binary("hash", gparent.Hash()))
 		c.locked = gparent
 		err := c.store.SetTag(LockedTag, gparent.Hash())
 		if err != nil {
-			c.logger.Fatal("can't set locked tag", zap.Error(err))
+			c.vlog.Fatal("can't set locked tag", zap.Error(err))
 		}
 	}
 	// 3-chain commited must be without gaps
 	if parent.View-gparent.View == 1 && gparent.View-ggparent.View == 1 && ggparent.View > c.commit.View {
-		c.logger.Info("new  commited", zap.Uint64("view", ggparent.View), zap.Binary("hash", ggparent.Hash()))
+		c.vlog.Info("new block commited", zap.Uint64("view", ggparent.View), zap.Binary("hash", ggparent.Hash()))
 		c.commit = ggparent
 		err := c.store.SetTag(DecideTag, ggparent.Hash())
 		if err != nil {
-			c.logger.Fatal("can't set decided tag", zap.Error(err))
+			c.vlog.Fatal("can't set decided tag", zap.Error(err))
 		}
 		c.Progress.AddHeader(c.commit)
 	}
@@ -360,7 +367,7 @@ func (c *consensus) update(header *types.Header, cert *types.Certificate) {
 
 func (c *consensus) updatePrepare(header *types.Header, cert *types.Certificate) {
 	if header.View > c.prepare.View {
-		c.logger.Debug("new block certified",
+		c.vlog.Debug("new block certified",
 			zap.Uint64("view", header.View),
 			zap.Binary("hash", header.Hash()),
 		)
@@ -368,12 +375,12 @@ func (c *consensus) updatePrepare(header *types.Header, cert *types.Certificate)
 		c.prepareCert = cert
 		err := c.store.SetTag(PrepareTag, header.Hash())
 		if err != nil {
-			c.logger.Fatal("failed to set prepare tag", zap.Error(err))
+			c.vlog.Fatal("failed to set prepare tag", zap.Error(err))
 		}
 		c.view = header.View + 1
 		err = c.store.SaveView(c.view)
 		if err != nil {
-			c.logger.Fatal("failed to store view", zap.Error(err))
+			c.vlog.Fatal("failed to store view", zap.Error(err))
 		}
 	}
 }
@@ -412,21 +419,26 @@ func (c *consensus) newTimeout() int {
 
 func (c *consensus) onVote(vote *types.Vote) {
 	// next leader is reponsible for aggregating votes from the previous round
-	logger := c.logger.With(
+	log := c.vlog.With(
 		zap.String("msg", "vote"),
 		zap.Uint64("voter", vote.Voter),
 		zap.Uint64("view", c.view),
 		zap.Binary("hash", vote.Block),
 	)
-	if c.id != c.getLeader(c.view+1) {
+	if c.id != c.getLeader(vote.View+1) {
 		return
 	}
-	logger.Debug("received vote")
+	log.Debug("received vote")
 	if !c.votes.Collect(vote) {
 		// do nothing if there is no majority
 		return
 	}
 	// update leaf and certificate to collected and prepare for proposal
+	if err := c.store.SaveCertificate(c.votes.Cert); err != nil {
+		c.log.Fatal("can't save new certificate",
+			zap.Binary("cert for block", c.votes.Cert.Block),
+		)
+	}
 	c.updatePrepare(c.votes.Header, c.votes.Cert)
 	c.nextRound(false)
 }
@@ -435,7 +447,8 @@ func (c *consensus) onNewView(msg *types.NewView) {
 	if c.id != c.getLeader(msg.View+1) {
 		return
 	}
-	c.logger.Debug("received new-view",
+	c.vlog.Debug("received new-view",
+		zap.Uint64("local view", c.view),
 		zap.Uint64("timedout view", msg.View),
 		zap.Binary("certificate for", msg.Cert.Block),
 		zap.Uint64("from", msg.Voter),
@@ -443,7 +456,7 @@ func (c *consensus) onNewView(msg *types.NewView) {
 
 	header, err := c.store.GetHeader(msg.Cert.Block)
 	if err != nil {
-		c.logger.Debug("can't find block", zap.Binary("block", msg.Cert.Block))
+		c.vlog.Debug("can't find block", zap.Binary("block", msg.Cert.Block))
 		return
 	}
 
@@ -465,9 +478,9 @@ func (c *consensus) onNewView(msg *types.NewView) {
 		return
 	}
 	// if all new-views received before replica became a leader it must enter new round and then wait for data
-	c.logger.Debug("collected enough new-views to propose a block",
-		zap.Uint64("view", c.view),
+	c.vlog.Debug("collected enough new-views to propose a block",
 		zap.Uint64("timedout view", msg.View))
+
 	if c.view == msg.View {
 		c.nextRound(false)
 	} else {
