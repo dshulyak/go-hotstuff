@@ -110,13 +110,14 @@ func (c *consensus) Tick() {
 	}
 }
 
-func (c *consensus) Send(root []byte, data *types.Data) {
+func (c *consensus) Send(state, root []byte, data *types.Data) {
 	if c.waitingData {
 		c.waitingData = false
 		header := &types.Header{
-			View:     c.view,
-			Parent:   c.prepare.Hash(),
-			DataRoot: root,
+			View:      c.view,
+			Parent:    c.prepare.Hash(),
+			DataRoot:  root,
+			StateRoot: state,
 		}
 		proposal := &types.Proposal{
 			Header:     header,

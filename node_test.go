@@ -133,8 +133,8 @@ func waitViewCommited(view uint64, headersC <-chan []BlockEvent) {
 	}
 }
 
-func testChainConsistencyAfterProgress(t *testing.T, view uint64, filter func(MsgTo) bool) {
-	nodes := createNodes(t, 10, 20*time.Millisecond)
+func testChainConsistencyAfterProgress(t *testing.T, n int, view uint64, filter func(MsgTo) bool) {
+	nodes := createNodes(t, n, 20*time.Millisecond)
 
 	networkC := make(chan []MsgTo, 100)
 	headersC := make(chan []BlockEvent, 100)
@@ -167,21 +167,22 @@ func testChainConsistencyAfterProgress(t *testing.T, view uint64, filter func(Ms
 }
 
 func TestNodesProgressWithoutErrors(t *testing.T) {
-	testChainConsistencyAfterProgress(t, 100, nil)
+	testChainConsistencyAfterProgress(t, 4, 100, nil)
 }
 
 func TestNodesProgressMessagesDropped(t *testing.T) {
 	// TODO this test is very random. there should be periods of asynchrony, not constant possibility of messages
 	// being dropped, otherwise chances of establishing 3-chain are very low
 
-	testChainConsistencyAfterProgress(t, 3, func(msg MsgTo) bool {
+	testChainConsistencyAfterProgress(t, 4, 3, func(msg MsgTo) bool {
 		return rand.Intn(100) < 10
 	})
 }
 
 func TestNodesProposalDropped(t *testing.T) {
 	count := 5
-	testChainConsistencyAfterProgress(t, 10, func(msg MsgTo) bool {
+	// 10 nodes because one of them will become out of sync
+	testChainConsistencyAfterProgress(t, 10, 10, func(msg MsgTo) bool {
 		if msg.Message.GetProposal() != nil {
 			count--
 			return count == 0

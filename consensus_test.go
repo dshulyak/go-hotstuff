@@ -91,7 +91,7 @@ func TestConsensusErrorFreeQuorumProgress(t *testing.T) {
 	}
 	require.NotZero(t, waiting)
 	root := randRoot()
-	nodes[waiting].Consensus.Send(root, &types.Data{})
+	nodes[waiting].Consensus.Send(nil, root, &types.Data{})
 
 	// it should prepare one proposal to be broadcasted
 	msgs := nodes[waiting].Consensus.Progress.Messages
@@ -159,7 +159,7 @@ func TestConsensusTimeoutsProgress(t *testing.T) {
 		}
 	}
 	require.NotZero(t, waiting)
-	nodes[waiting].Consensus.Send(randRoot(), &types.Data{})
+	nodes[waiting].Consensus.Send(nil, randRoot(), &types.Data{})
 }
 
 type noopSignerVerifier struct {

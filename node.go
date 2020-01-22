@@ -19,8 +19,9 @@ var (
 )
 
 type Data struct {
-	Root []byte
-	Data *types.Data
+	State []byte
+	Root  []byte
+	Data  *types.Data
 }
 
 type Replica struct {
@@ -185,7 +186,7 @@ func (n *Node) run() {
 		case msg := <-n.received:
 			n.consensus.Step(msg)
 		case data := <-n.send:
-			n.consensus.Send(data.Root, data.Data)
+			n.consensus.Send(data.State, data.Root, data.Data)
 		case <-ticker.C:
 			n.consensus.Tick()
 		case waitingData <- struct{}{}:
