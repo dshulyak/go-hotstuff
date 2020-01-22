@@ -4,6 +4,7 @@ import (
 	"bytes"
 
 	"github.com/dshulyak/go-hotstuff/types"
+	"golang.org/x/crypto/blake2s"
 )
 
 func NewTimeouts(verifier Verifier, majority int) *Timeouts {
@@ -47,7 +48,7 @@ func (t *Timeouts) Collect(nview *types.NewView) bool {
 	if exist {
 		return false
 	}
-	if !t.verifier.VerifySingle(nview.Voter, EncodeUint64(nview.View), nview.Sig) {
+	if !t.verifier.VerifySingle(nview.Voter, HashSum(EncodeUint64(nview.View)), nview.Sig) {
 		return false
 	}
 	t.received[nview.Voter] = struct{}{}
@@ -144,4 +145,10 @@ func ImportGenesis(store *BlockStore, genesis *types.Block) error {
 		return err
 	}
 	return nil
+}
+
+func HashSum(buf []byte) []byte {
+	digest, _ := blake2s.New256(nil)
+	digest.Write(buf)
+	return digest.Sum(make([]byte, 0, digest.Size()))
 }

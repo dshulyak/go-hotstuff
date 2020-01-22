@@ -294,7 +294,7 @@ func (c *consensus) sendNewView() {
 		View:  c.view - 1,
 		Cert:  c.prepareCert,
 		// TODO prehash encoded uint
-		Sig: c.signer.Sign(nil, EncodeUint64(c.view-1)),
+		Sig: c.signer.Sign(nil, HashSum(EncodeUint64(c.view-1))),
 	}
 	c.voted = c.view - 1
 	err := c.store.SaveVoted(c.voted)
