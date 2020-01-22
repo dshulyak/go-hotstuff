@@ -22,8 +22,9 @@ type BlockEvent struct {
 // - state machine (block verification and executing new commited blocks)
 // - network (sending and receiving messages)
 type Progress struct {
-	Messages    []MsgTo
-	Events      []BlockEvent
+	Messages []MsgTo
+	Events   []BlockEvent
+	// TODO waiting data signal must include a version we built on top, we will need to get state root based on this version
 	WaitingData bool
 }
 
