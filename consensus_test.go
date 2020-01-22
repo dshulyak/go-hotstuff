@@ -71,7 +71,7 @@ func setupTestNodes(tb testing.TB, n int) map[uint64]*testNode {
 	return nodes
 }
 
-func TestErrorFreeQuorumProgress(t *testing.T) {
+func TestConsensusErrorFreeQuorumProgress(t *testing.T) {
 	var (
 		nodes   = setupTestNodes(t, 4)
 		waiting uint64
@@ -94,7 +94,7 @@ func TestErrorFreeQuorumProgress(t *testing.T) {
 
 	// it should prepare one proposal to be broadcasted
 	msgs := nodes[waiting].Consensus.Progress.Messages
-	require.Len(t, msgs, 1)
+	require.Len(t, msgs, 2) // proposal and a vote
 
 	msg := msgs[0]
 	require.True(t, msg.Broadcast())
@@ -104,10 +104,12 @@ func TestErrorFreeQuorumProgress(t *testing.T) {
 	// every node will verify proposal and respond with votes to the next leader
 	// note that we send same message to every node including one who prep'ed proposal
 	votes := make([]MsgTo, 0, len(nodes))
+	votes = append(votes, msgs[1])
 	for _, n := range nodes {
 		n.Consensus.Step(msg.Message)
-		require.Len(t, n.Consensus.Progress.Messages, 1)
-		votes = append(votes, n.Consensus.Progress.Messages[0])
+		for _, msg := range n.Consensus.Progress.Messages {
+			votes = append(votes, msg)
+		}
 		n.Consensus.Progress.Reset()
 	}
 
@@ -122,7 +124,7 @@ func TestErrorFreeQuorumProgress(t *testing.T) {
 	require.True(t, nodes[leader].Consensus.Progress.WaitingData)
 }
 
-func TestTimeoutsProgress(t *testing.T) {
+func TestConsensusTimeoutsProgress(t *testing.T) {
 	var (
 		nodes = setupTestNodes(t, 4)
 	)
@@ -158,3 +160,20 @@ func TestTimeoutsProgress(t *testing.T) {
 	require.NotZero(t, waiting)
 	nodes[waiting].Consensus.Send(randRoot(), &types.Data{})
 }
+
+type noopSignerVerifier struct {
+}
+
+func (noop noopSignerVerifier) Sign(dst []byte, _ []byte) []byte {
+	return dst
+}
+
+func (noop noopSignerVerifier) VerifyCert(*types.Certificate) bool {
+	return true
+}
+
+func (noop noopSignerVerifier) VerifySingle(uint64, []byte, []byte) bool {
+	return true
+}
+
+func (noop noopSignerVerifier) Merge(*types.Certificate, *types.Vote) {}
