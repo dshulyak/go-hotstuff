@@ -11,6 +11,11 @@ func (m *MsgTo) Broadcast() bool {
 	return m.Recipients == nil
 }
 
+type BlockEvent struct {
+	Header    *types.Header
+	Finalized bool
+}
+
 // Progress is an endpoint for interaction with consensus module.
 // Consensus is expected to interact with:
 // - transaction pool (notify that node can propose a new block)
@@ -18,26 +23,26 @@ func (m *MsgTo) Broadcast() bool {
 // - network (sending and receiving messages)
 type Progress struct {
 	Messages    []MsgTo
-	Headers     []*types.Header
+	Events      []BlockEvent
 	WaitingData bool
 }
 
 func (p *Progress) Empty() bool {
-	return len(p.Messages) == 0 && len(p.Headers) == 0 && !p.WaitingData
+	return len(p.Messages) == 0 && len(p.Events) == 0 && !p.WaitingData
 }
 
 func (p *Progress) AddMessage(msg *types.Message, recipients ...uint64) {
 	p.Messages = append(p.Messages, MsgTo{Recipients: recipients, Message: msg})
 }
 
-func (p *Progress) AddHeader(header *types.Header) {
-	p.Headers = append(p.Headers, header)
+func (p *Progress) AddHeader(header *types.Header, finalized bool) {
+	p.Events = append(p.Events, BlockEvent{Header: header, Finalized: finalized})
 }
 
 func (p *Progress) Reset() {
 	p.WaitingData = false
 	p.Messages = nil
-	p.Headers = nil
+	p.Events = nil
 }
 
 func NewVoteMsg(vote *types.Vote) *types.Message {

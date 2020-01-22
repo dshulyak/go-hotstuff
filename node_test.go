@@ -69,7 +69,7 @@ func testChainConsistency(tb testing.TB, nodes []*Node) {
 	}
 }
 
-func nodeEventLoop(ctx context.Context, n *Node, networkC chan<- []MsgTo, headersC chan<- []*types.Header) {
+func nodeEventLoop(ctx context.Context, n *Node, networkC chan<- []MsgTo, headersC chan<- []BlockEvent) {
 	n.Start()
 	for {
 		select {
@@ -117,14 +117,14 @@ func broadcastMsgs(ctx context.Context, nodes []*Node, networkC <-chan []MsgTo, 
 	}
 }
 
-func waitViewCommited(view uint64, headersC <-chan []*types.Header) {
+func waitViewCommited(view uint64, headersC <-chan []BlockEvent) {
 	var (
 		current uint64 = 0
 	)
 	for headers := range headersC {
 		for _, h := range headers {
-			if h.View > current {
-				current = h.View
+			if h.Finalized && h.Header.View > current {
+				current = h.Header.View
 			}
 			if current >= view {
 				return
@@ -137,7 +137,7 @@ func testChainConsistencyAfterProgress(t *testing.T, view uint64, filter func(Ms
 	nodes := createNodes(t, 10, 20*time.Millisecond)
 
 	networkC := make(chan []MsgTo, 100)
-	headersC := make(chan []*types.Header, 100)
+	headersC := make(chan []BlockEvent, 100)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()

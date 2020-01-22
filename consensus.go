@@ -361,7 +361,7 @@ func (c *consensus) update(header *types.Header, cert *types.Certificate) {
 		if err != nil {
 			c.vlog.Fatal("can't set decided tag", zap.Error(err))
 		}
-		c.Progress.AddHeader(c.commit)
+		c.Progress.AddHeader(c.commit, true)
 	}
 }
 
@@ -382,6 +382,7 @@ func (c *consensus) updatePrepare(header *types.Header, cert *types.Certificate)
 		if err != nil {
 			c.vlog.Fatal("failed to store view", zap.Error(err))
 		}
+		c.Progress.AddHeader(header, false)
 	}
 }
 

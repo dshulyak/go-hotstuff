@@ -59,7 +59,7 @@ func NewNode(logger *zap.Logger, store *BlockStore, priv ed25519.PrivateKey, con
 		received:    make(chan *types.Message, 1),
 		send:        make(chan Data, 1),
 		deliver:     make(chan []MsgTo, 1),
-		blocks:      make(chan []*types.Header, 1),
+		blocks:      make(chan []BlockEvent, 1),
 		waitingData: make(chan struct{}, 1),
 		quit:        make(chan struct{}),
 		done:        make(chan struct{}),
@@ -79,7 +79,7 @@ type Node struct {
 	received    chan *types.Message
 	deliver     chan []MsgTo
 	send        chan Data
-	blocks      chan []*types.Header
+	blocks      chan []BlockEvent
 	waitingData chan struct{}
 	quit        chan struct{}
 	done        chan struct{}
@@ -122,7 +122,7 @@ func (n *Node) Ready() <-chan struct{} {
 }
 
 // Blocks will emit headers of the commited blocks.
-func (n *Node) Blocks() <-chan []*types.Header {
+func (n *Node) Blocks() <-chan []BlockEvent {
 	return n.blocks
 }
 
@@ -147,9 +147,9 @@ func (n *Node) run() {
 
 		hasProgress int
 		toSend      []MsgTo
-		toUpdate    []*types.Header
+		toUpdate    []BlockEvent
 
-		blocks      chan []*types.Header
+		blocks      chan []BlockEvent
 		messages    chan []MsgTo
 		waitingData chan struct{}
 	)
@@ -166,9 +166,9 @@ func (n *Node) run() {
 				toSend = progress.Messages
 				messages = n.deliver
 			}
-			if len(progress.Headers) > 0 {
+			if len(progress.Events) > 0 {
 				hasProgress++
-				toUpdate = progress.Headers
+				toUpdate = progress.Events
 				blocks = n.blocks
 			}
 			if progress.WaitingData {
