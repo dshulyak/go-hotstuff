@@ -5,7 +5,14 @@ message Message {
                 Proposal proposal = 1;
                 NewView newview = 2;
                 Vote vote = 3;
+                Sync sync = 4;
         }
+}
+
+message SyncRequest {
+        Header from = 1;
+        // zero limit sends all
+        uint64 limit = 2;
 }
 
 // Proposal carries header and data of the new proposal and certificate of the parent.
@@ -36,8 +43,9 @@ message Block {
 message Header {
         uint64 view = 1;
         bytes parent = 2;
-        bytes dataRoot = 3;
-        bytes stateRoot = 4;
+        uint64 parentView = 3;
+        bytes dataRoot = 4;
+        bytes stateRoot = 5;
 }
 
 // Vote should be naturally aggregated into the certificate.
@@ -72,4 +80,8 @@ message Transaction {
         uint64 nonce = 2;
         bytes data = 3;
         bytes sig = 4;
+}
+
+message Sync {
+        repeated Block blocks = 1;
 }

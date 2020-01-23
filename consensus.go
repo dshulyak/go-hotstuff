@@ -114,10 +114,11 @@ func (c *consensus) Send(state, root []byte, data *types.Data) {
 	if c.waitingData {
 		c.waitingData = false
 		header := &types.Header{
-			View:      c.view,
-			Parent:    c.prepare.Hash(),
-			DataRoot:  root,
-			StateRoot: state,
+			View:       c.view,
+			ParentView: c.prepare.View,
+			Parent:     c.prepare.Hash(),
+			DataRoot:   root,
+			StateRoot:  state,
 		}
 		proposal := &types.Proposal{
 			Header:     header,
@@ -143,6 +144,8 @@ func (c *consensus) Step(msg *types.Message) {
 		c.onVote(m.Vote)
 	case *types.Message_Newview:
 		c.onNewView(m.Newview)
+	case *types.Message_Sync:
+		c.onSync(m.Sync)
 	}
 }
 
@@ -235,10 +238,11 @@ func (c *consensus) onProposal(msg *types.Proposal) {
 		log.Debug("certificate is invalid")
 		return
 	}
-	parent, err := c.store.GetHeader(msg.ParentCert.Block)
+	parent, err := c.store.GetHeader(msg.Header.Parent)
 	if err != nil {
 		log.Debug("header for parent is not found", zap.Error(err))
 		// TODO if certified block is not found we need to sync with another node
+		c.Progress.AddNotFound(msg.Header.ParentView, msg.Header.Parent)
 		return
 	}
 
@@ -256,7 +260,7 @@ func (c *consensus) onProposal(msg *types.Proposal) {
 
 	c.updatePrepare(parent, msg.ParentCert)
 	c.syncView(parent, msg.ParentCert, msg.Timeout)
-	c.update(msg.Header, msg.ParentCert)
+	c.update(parent, msg.ParentCert)
 
 	if msg.Header.View != c.view {
 		log.Debug("proposal view doesn't match local view")
@@ -266,10 +270,9 @@ func (c *consensus) onProposal(msg *types.Proposal) {
 	// TODO after basic validation, state machine needs to validate Data included in the proposal
 	// add Data to Progress and wait for a validation from state machine
 	// everything after this comment should be done after receiving ack from app state machine
-
+	c.persistProposal(msg)
 	if msg.Header.View > c.voted && c.safeNode(msg.Header, msg.ParentCert) {
 		log.Debug("proposal is safe to vote on")
-		c.persistProposal(msg)
 		c.sendVote(msg.Header)
 	}
 }
@@ -279,7 +282,7 @@ func (c *consensus) persistProposal(msg *types.Proposal) {
 	// TODO header and data for proposal must be tracked, as they can be pruned from store
 	// e.g. add a separate bucket for tracking non-finalized blocks
 	// remove from that bucket when block is commited
-	// in background run a thread that will clear blocks that are in that bucket with a height <= commited hight
+	// in background run a thread that will clear blocks that are in that bucket with a height <= commited height
 	err := c.store.SaveHeader(msg.Header)
 	if err != nil {
 		c.vlog.Fatal("can't save a header", zap.Error(err))
@@ -288,7 +291,6 @@ func (c *consensus) persistProposal(msg *types.Proposal) {
 	if err != nil {
 		c.vlog.Fatal("can't save a block data", zap.Error(err))
 	}
-
 	err = c.store.SaveCertificate(msg.ParentCert)
 	if err != nil {
 		c.vlog.Fatal("can't save a certificate", zap.Error(err))
@@ -297,7 +299,6 @@ func (c *consensus) persistProposal(msg *types.Proposal) {
 
 func (c *consensus) sendNewView() {
 	// send new-view to the leader of this round.
-
 	leader := c.getLeader(c.view)
 	nview := &types.NewView{
 		Voter: c.id,
@@ -337,12 +338,8 @@ func (c *consensus) sendVote(header *types.Header) {
 	c.sendMsg(NewVoteMsg(vote), c.getLeader(vote.View+1))
 }
 
-func (c *consensus) update(header *types.Header, cert *types.Certificate) {
+func (c *consensus) update(parent *types.Header, cert *types.Certificate) {
 	// TODO if any node is missing in the chain we should switch to sync mode
-	parent, err := c.store.GetHeader(header.Parent)
-	if err != nil {
-		return
-	}
 	gparent, err := c.store.GetHeader(parent.Parent)
 	if err != nil {
 		return
@@ -351,8 +348,6 @@ func (c *consensus) update(header *types.Header, cert *types.Certificate) {
 	if err != nil {
 		return
 	}
-
-	// TODO 1-2 chain blocks should be emitted also so that transaction pool can be adjusted accordingly
 
 	// 2-chain locked, gaps are allowed
 	if gparent.View > c.locked.View {
@@ -405,6 +400,40 @@ func (c *consensus) syncView(header *types.Header, cert *types.Certificate, tcer
 		}
 		c.nextRound(false)
 	}
+}
+
+func (c *consensus) onSync(sync *types.Sync) {
+	for _, block := range sync.Blocks {
+		if !c.syncBlock(block) {
+			return
+		}
+	}
+}
+
+// syncBlock returns false if block is invalid.
+func (c *consensus) syncBlock(block *types.Block) bool {
+	if block.Header == nil || block.Cert == nil || block.Data == nil {
+		return false
+	}
+	if block.Header.View <= c.commit.View {
+		return true
+	}
+	if !c.verifier.VerifyCert(block.Header.Hash(), block.Cert.Sig) {
+		return false
+	}
+	log := c.log.With(
+		zap.Uint64("block view", block.Header.View),
+		zap.Binary("block hash", block.Header.Hash()),
+	)
+	log.Debug("syncing block")
+
+	if err := c.store.SaveBlock(block); err != nil {
+		log.Fatal("can't save block")
+	}
+
+	c.updatePrepare(block.Header, block.Cert)
+	c.update(block.Header, block.Cert)
+	return true
 }
 
 func (c *consensus) safeNode(header *types.Header, cert *types.Certificate) bool {
@@ -487,16 +516,18 @@ func (c *consensus) onNewView(msg *types.NewView) {
 	if !c.timeouts.Collect(msg) {
 		return
 	}
-	// if all new-views received before replica became a leader it must enter new round and then wait for data
+
 	c.vlog.Debug("collected enough new-views to propose a block",
 		zap.Uint64("timedout view", msg.View))
 
-	c.syncView(c.prepare, c.prepareCert, c.timeouts.Cert)
+	// if all new-views received before replica became a leader it must enter new round and then wait for data
+	view := c.view
+
 	c.timeoutCert = c.timeouts.Cert
-	if c.view == msg.View {
+	c.syncView(c.prepare, c.prepareCert, c.timeouts.Cert)
+	if view == msg.View {
 		c.nextRound(false)
 	} else {
-		c.timeouts.Reset()
 		c.waitingData = true
 		c.Progress.WaitingData = true
 	}

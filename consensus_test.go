@@ -2,6 +2,7 @@ package hotstuff
 
 import (
 	"crypto/rand"
+	"sort"
 	"testing"
 
 	"github.com/dshulyak/go-hotstuff/crypto"
@@ -31,11 +32,11 @@ func randRoot() []byte {
 }
 
 type testNode struct {
-	ID        uint64
-	Consensus *consensus
-	Store     *BlockStore
-	Signer    Signer
-	Verifier  Verifier
+	*consensus
+	ID       uint64
+	Store    *BlockStore
+	Signer   Signer
+	Verifier Verifier
 }
 
 func setupTestNodes(tb testing.TB, n int) map[uint64]*testNode {
@@ -53,7 +54,6 @@ func setupTestNodes(tb testing.TB, n int) map[uint64]*testNode {
 		store := NewBlockStore(db)
 		signer := crypto.NewEd25519Signer(privs[id])
 		verifier := crypto.NewEd25519Verifier(2*len(pubs)/3+1, pubs)
-		//cons := newConsensus(nil, store, signer, verifier, id, replicas)
 		sig := signer.Sign(nil, genesis.Header.Hash())
 		genesis.Cert.Sig.Voters = append(genesis.Cert.Sig.Voters, id)
 		genesis.Cert.Sig.Sigs = append(genesis.Cert.Sig.Sigs, sig)
@@ -64,9 +64,13 @@ func setupTestNodes(tb testing.TB, n int) map[uint64]*testNode {
 			Store:    store,
 		}
 	}
+	sort.Slice(replicas, func(i, j int) bool {
+		return replicas[i] < replicas[j]
+	})
+
 	for _, n := range nodes {
 		require.NoError(tb, ImportGenesis(n.Store, genesis))
-		n.Consensus = newConsensus(logger, n.Store, n.Signer, n.Verifier, n.ID, replicas)
+		n.consensus = newConsensus(logger, n.Store, n.Signer, n.Verifier, n.ID, replicas)
 	}
 
 	return nodes
@@ -80,38 +84,38 @@ func TestConsensusErrorFreeQuorumProgress(t *testing.T) {
 
 	// one of the nodes will observe that it must be a leader for this round and will be waiting for data
 	for id, n := range nodes {
-		n.Consensus.Start()
-		if n.Consensus.Progress.WaitingData {
+		n.Start()
+		if n.Progress.WaitingData {
 			if waiting != 0 {
 				require.Fail(t, "both %d and %d are waiting for data", id, waiting)
 			}
 			waiting = id
 		}
-		n.Consensus.Progress.Reset()
+		n.Progress.Reset()
 	}
 	require.NotZero(t, waiting)
 	root := randRoot()
-	nodes[waiting].Consensus.Send(nil, root, &types.Data{})
+	nodes[waiting].Send(nil, root, &types.Data{})
 
 	// it should prepare one proposal to be broadcasted
-	msgs := nodes[waiting].Consensus.Progress.Messages
+	msgs := nodes[waiting].Progress.Messages
 	require.Len(t, msgs, 2) // proposal and a vote
 
 	msg := msgs[0]
 	require.True(t, msg.Broadcast())
 	require.NotNil(t, msg.Message.GetProposal())
-	nodes[waiting].Consensus.Progress.Reset()
+	nodes[waiting].Progress.Reset()
 
 	// every node will verify proposal and respond with votes to the next leader
 	// note that we send same message to every node including one who prep'ed proposal
 	votes := make([]MsgTo, 0, len(nodes))
 	votes = append(votes, msgs[1])
 	for _, n := range nodes {
-		n.Consensus.Step(msg.Message)
-		for _, msg := range n.Consensus.Progress.Messages {
+		n.Step(msg.Message)
+		for _, msg := range n.Progress.Messages {
 			votes = append(votes, msg)
 		}
-		n.Consensus.Progress.Reset()
+		n.Progress.Reset()
 	}
 
 	// all votes must be delivered to the same node
@@ -119,10 +123,10 @@ func TestConsensusErrorFreeQuorumProgress(t *testing.T) {
 	leader := votes[0].Recipients[0]
 	for _, v := range votes {
 		require.Equal(t, leader, v.Recipients[0])
-		nodes[leader].Consensus.Step(v.Message)
+		nodes[leader].Step(v.Message)
 	}
 	// once collected replica will transition to new view and will wait for a data for new block
-	require.True(t, nodes[leader].Consensus.Progress.WaitingData, "replica %d must be waiting for data", leader)
+	require.True(t, nodes[leader].Progress.WaitingData, "replica %d must be waiting for data", leader)
 }
 
 func TestConsensusTimeoutsProgress(t *testing.T) {
@@ -131,35 +135,98 @@ func TestConsensusTimeoutsProgress(t *testing.T) {
 	)
 
 	for _, n := range nodes {
-		n.Consensus.Start()
-		n.Consensus.Progress.Reset()
+		n.Start()
+		n.Progress.Reset()
 	}
 
 	// two ticks should be enough to timeout nodes
 	newviews := make([]MsgTo, 0, len(nodes))
 	for _, n := range nodes {
-		n.Consensus.Tick()
-		n.Consensus.Tick()
+		n.Tick()
+		n.Tick()
 		// each node will send new-view message to leader of the round 2
-		require.Len(t, n.Consensus.Progress.Messages, 1)
-		newviews = append(newviews, n.Consensus.Progress.Messages[0])
-		n.Consensus.Progress.Reset()
+		require.Len(t, n.Progress.Messages, 1)
+		newviews = append(newviews, n.Progress.Messages[0])
+		n.Progress.Reset()
 	}
 
 	for _, nv := range newviews {
 		for _, r := range nv.Recipients {
-			nodes[r].Consensus.Step(nv.Message)
+			nodes[r].Step(nv.Message)
 		}
 	}
 	// after receiving new-views one node must be waiting for data
 	waiting := uint64(0)
 	for i, n := range nodes {
-		if n.Consensus.Progress.WaitingData {
+		if n.Progress.WaitingData {
 			waiting = i
 		}
 	}
 	require.NotZero(t, waiting)
-	nodes[waiting].Consensus.Send(nil, randRoot(), &types.Data{})
+	nodes[waiting].Send(nil, randRoot(), &types.Data{})
+}
+
+func propagateOneBlock(nodes []*testNode) {
+	var (
+		stack1, stack2 []MsgTo
+	)
+	for _, n := range nodes {
+		if n.Progress.WaitingData {
+			n.Send(nil, randRoot(), &types.Data{})
+			for _, msg := range n.Progress.Messages {
+				stack1 = append(stack1, msg)
+			}
+		}
+		n.Progress.Reset()
+	}
+
+	for _, n := range nodes {
+		for _, msg := range stack1 {
+			n.Step(msg.Message)
+		}
+		for _, msg := range n.Progress.Messages {
+			stack2 = append(stack2, msg)
+		}
+		n.Progress.Reset()
+	}
+	for _, n := range nodes {
+		for _, msg := range stack2 {
+			n.Step(msg.Message)
+		}
+	}
+}
+
+func TestConsensusProgressAfterSync(t *testing.T) {
+	var (
+		nodes = setupTestNodes(t, 4)
+		slice []*testNode
+	)
+
+	for _, n := range nodes {
+		n.Start()
+		slice = append(slice, n)
+	}
+	sort.Slice(slice, func(i, j int) bool {
+		return slice[i].ID < slice[j].ID
+	})
+
+	propagateOneBlock(slice[1:])
+	propagateOneBlock(slice[:3]) // won't make progress, 1st node is missing a block
+
+	first := slice[0]
+	require.Len(t, first.Progress.NotFound, 1)
+	missing := first.Progress.NotFound[0]
+	first.Progress.Reset()
+
+	second := slice[1]
+	block, err := second.Store.GetBlock(missing.Hash)
+	require.NoError(t, err)
+	require.NotNil(t, block)
+	first.Step(NewSyncMsg(block))
+	require.Len(t, first.Progress.Events, 1)
+	event := first.Progress.Events[0]
+	require.False(t, event.Finalized)
+	require.Equal(t, missing.Hash, event.Header.Hash())
 }
 
 type noopSignerVerifier struct {

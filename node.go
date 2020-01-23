@@ -62,6 +62,7 @@ func NewNode(logger *zap.Logger, store *BlockStore, priv ed25519.PrivateKey, con
 		deliver:     make(chan []MsgTo, 1),
 		blocks:      make(chan []BlockEvent, 1),
 		waitingData: make(chan struct{}, 1),
+		missing:     make(chan []BlockRef, 1),
 		quit:        make(chan struct{}),
 		done:        make(chan struct{}),
 		start:       make(chan struct{}),
@@ -81,6 +82,7 @@ type Node struct {
 	deliver     chan []MsgTo
 	send        chan Data
 	blocks      chan []BlockEvent
+	missing     chan []BlockRef
 	waitingData chan struct{}
 	quit        chan struct{}
 	done        chan struct{}
@@ -131,6 +133,10 @@ func (n *Node) Messages() <-chan []MsgTo {
 	return n.deliver
 }
 
+func (n *Node) Missing() <-chan []BlockRef {
+	return n.missing
+}
+
 // Start will panic if called more then one time.
 func (n *Node) Start() {
 	close(n.start)
@@ -146,35 +152,34 @@ func (n *Node) run() {
 	var (
 		ticker = time.NewTicker(n.conf.Interval)
 
-		hasProgress int
-		toSend      []MsgTo
-		toUpdate    []BlockEvent
+		toSend   []MsgTo
+		toUpdate []BlockEvent
+		toSync   []BlockRef
 
 		blocks      chan []BlockEvent
 		messages    chan []MsgTo
 		waitingData chan struct{}
+		missing     chan []BlockRef
 	)
-
-	defer ticker.Stop()
 
 	for {
 		// wait until all existing progress will be consumed
-		// we can even disable incoming messages
-		if hasProgress == 0 {
+		if missing == nil && waitingData == nil && blocks == nil && messages == nil {
 			progress := n.consensus.Progress
 			if len(progress.Messages) > 0 {
-				hasProgress++
 				toSend = progress.Messages
 				messages = n.deliver
 			}
 			if len(progress.Events) > 0 {
-				hasProgress++
 				toUpdate = progress.Events
 				blocks = n.blocks
 			}
 			if progress.WaitingData {
-				hasProgress++
 				waitingData = n.waitingData
+			}
+			if len(progress.NotFound) > 0 {
+				missing = n.missing
+				toSync = progress.NotFound
 			}
 			n.consensus.Progress.Reset()
 		}
@@ -191,17 +196,18 @@ func (n *Node) run() {
 			n.consensus.Tick()
 		case waitingData <- struct{}{}:
 			waitingData = nil
-			hasProgress--
+		case missing <- toSync:
+			missing = nil
 		case messages <- toSend:
 			toSend = nil
 			messages = nil
-			hasProgress--
 		case blocks <- toUpdate:
 			toUpdate = nil
 			blocks = nil
-			hasProgress--
 		case <-n.quit:
+			ticker.Stop()
 			close(n.done)
+			n.logger.Debug("exited event loop", zap.Binary("ID", n.conf.ID))
 			return
 		}
 	}

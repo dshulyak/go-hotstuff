@@ -161,9 +161,56 @@ func (s *BlockStore) GetVoted() (uint64, error) {
 	return DecodeUint64(data), nil
 }
 
+func (s *BlockStore) SaveBlock(block *types.Block) error {
+	if err := s.SaveHeader(block.Header); err != nil {
+		return err
+	}
+	if err := s.SaveCertificate(block.Cert); err != nil {
+		return err
+	}
+	if err := s.SaveData(block.Header.Hash(), block.Data); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (s *BlockStore) GetBlock(hash []byte) (*types.Block, error) {
+	header, err := s.GetHeader(hash)
+	if err != nil {
+		return nil, err
+	}
+	cert, err := s.GetCertificate(hash)
+	if err != nil {
+		return nil, err
+	}
+	data, err := s.GetData(hash)
+	if err != nil {
+		return nil, err
+	}
+	return &types.Block{Header: header, Cert: cert, Data: data}, nil
+}
+
+// TODO add iteration from older to newer using secondary index
+// key <chain>|parent|child and scan by <chain>|parent|*
+
 func NewChainIterator(store *BlockStore) *ChainIterator {
 	return &ChainIterator{
 		store: store,
+	}
+}
+
+func NewChainIteratorFromLatest(store *BlockStore) (*ChainIterator, error) {
+	header, err := store.GetTagHeader(PrepareTag)
+	if err != nil {
+		return nil, err
+	}
+	return NewChainIteratorFrom(store, header), nil
+}
+
+func NewChainIteratorFrom(store *BlockStore, from *types.Header) *ChainIterator {
+	return &ChainIterator{
+		store:  store,
+		header: from,
 	}
 }
 
