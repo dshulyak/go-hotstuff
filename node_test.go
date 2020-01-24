@@ -2,13 +2,13 @@ package hotstuff
 
 import (
 	"context"
-	"crypto/ed25519"
 	"flag"
 	"math/rand"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/dshulyak/go-hotstuff/crypto"
 	"github.com/dshulyak/go-hotstuff/types"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
@@ -26,15 +26,19 @@ func createNodes(tb testing.TB, n int, interval time.Duration) []*Node {
 	require.NoError(tb, err)
 
 	replicas := []Replica{}
-	privs := []ed25519.PrivateKey{}
-	for i := 1; i <= n; i++ {
-		pub, priv, err := ed25519.GenerateKey(rng)
-		require.NoError(tb, err)
+	pubs, privs, err := crypto.GenerateKeys(rng, n)
+	require.NoError(tb, err)
+
+	verifier := crypto.NewBLS12381Verifier(2*len(pubs)/3+1, pubs)
+	for id, pub := range pubs {
 		replicas = append(replicas, Replica{ID: pub})
-		privs = append(privs, priv)
-		genesis.Cert.Sig.Voters = append(genesis.Cert.Sig.Voters, uint64(i))
-		genesis.Cert.Sig.Sigs = append(genesis.Cert.Sig.Sigs, ed25519.Sign(priv, genesis.Header.Hash()))
+
+		signer := crypto.NewBLS12381Signer(privs[id])
+		sig := signer.Sign(nil, genesis.Header.Hash())
+		verifier.Merge(genesis.Cert.Sig, uint64(id), sig)
 	}
+
+	require.True(tb, verifier.VerifyAggregated(genesis.Header.Hash(), genesis.Cert.Sig))
 
 	nodes := make([]*Node, n)
 	for i, priv := range privs {
@@ -134,7 +138,7 @@ func waitViewCommited(view uint64, headersC <-chan []BlockEvent) {
 }
 
 func testChainConsistencyAfterProgress(t *testing.T, n int, view uint64, filter func(MsgTo) bool) {
-	nodes := createNodes(t, n, 20*time.Millisecond)
+	nodes := createNodes(t, n, 100*time.Millisecond)
 
 	networkC := make(chan []MsgTo, 100)
 	headersC := make(chan []BlockEvent, 100)
@@ -167,7 +171,7 @@ func testChainConsistencyAfterProgress(t *testing.T, n int, view uint64, filter 
 }
 
 func TestNodesProgressWithoutErrors(t *testing.T) {
-	testChainConsistencyAfterProgress(t, 4, 100, nil)
+	testChainConsistencyAfterProgress(t, 4, 20, nil)
 }
 
 func TestNodesProgressMessagesDropped(t *testing.T) {

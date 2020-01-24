@@ -68,7 +68,7 @@ message TimeoutCertificate {
 
 message AggregatedSignature {
         repeated uint64 voters = 1;
-        repeated bytes sigs = 2;
+        bytes sig = 2;
 }
 
 message Data {

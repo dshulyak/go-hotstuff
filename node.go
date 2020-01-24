@@ -1,9 +1,7 @@
 package hotstuff
 
 import (
-	"bytes"
 	"context"
-	"crypto/ed25519"
 	"errors"
 	"net"
 	"time"
@@ -25,32 +23,34 @@ type Data struct {
 }
 
 type Replica struct {
-	ID ed25519.PublicKey
+	ID crypto.PublicKey
 	IP net.IP
 }
 
 type Config struct {
 	Interval time.Duration
-	ID       ed25519.PublicKey
+	ID       crypto.PublicKey
 	Replicas []Replica
 }
 
-func NewNode(logger *zap.Logger, store *BlockStore, priv ed25519.PrivateKey, conf Config) *Node {
-	signer := crypto.NewEd25519Signer(priv)
+func NewNode(logger *zap.Logger, store *BlockStore, priv crypto.PrivateKey, conf Config) *Node {
+	signer := crypto.NewBLS12381Signer(priv)
 	replicas := conf.Replicas
 	// FIXME introduce type ID []byte or [32]byte and use it instead of uint64 for replica id everywhere
-	pubs := map[uint64]ed25519.PublicKey{}
+	pubs := make([]crypto.PublicKey, 0, len(conf.Replicas))
 	ids := []uint64{}
 	rid := uint64(0)
 	for i, r := range replicas {
-		id := uint64(i + 1)
+		id := uint64(i)
 		ids = append(ids, id)
-		pubs[id] = r.ID
-		if bytes.Compare(conf.ID, r.ID) == 0 {
+
+		pubs = append(pubs, r.ID)
+
+		if conf.ID == r.ID {
 			rid = id
 		}
 	}
-	verifier := crypto.NewEd25519Verifier(2*len(pubs)/3+1, pubs)
+	verifier := crypto.NewBLS12381Verifier(2*len(pubs)/3+1, pubs)
 	consensus := newConsensus(logger, store, signer, verifier, rid, ids)
 	n := &Node{
 		logger:      logger,
@@ -148,7 +148,7 @@ func (n *Node) Close() {
 }
 
 func (n *Node) run() {
-	n.logger.Debug("started event loop", zap.Binary("ID", n.conf.ID))
+	n.logger.Debug("started event loop")
 	var (
 		ticker = time.NewTicker(n.conf.Interval)
 
@@ -207,7 +207,7 @@ func (n *Node) run() {
 		case <-n.quit:
 			ticker.Stop()
 			close(n.done)
-			n.logger.Debug("exited event loop", zap.Binary("ID", n.conf.ID))
+			n.logger.Debug("exited event loop")
 			return
 		}
 	}

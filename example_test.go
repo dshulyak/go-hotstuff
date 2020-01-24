@@ -2,9 +2,9 @@ package hotstuff
 
 import (
 	"context"
-	"crypto/ed25519"
 	"time"
 
+	"github.com/dshulyak/go-hotstuff/crypto"
 	"github.com/dshulyak/go-hotstuff/types"
 	"go.uber.org/zap"
 )
@@ -17,12 +17,11 @@ func ExampleFull() {
 	db := NewMemDB()
 	store := NewBlockStore(db)
 
-	pub, pkey, err := ed25519.GenerateKey(nil)
+	pkey, _, err := crypto.GenerateKey(nil)
 	must(err)
 
 	conf := Config{
 		Interval: 100 * time.Millisecond, // estimated max network delay
-		ID:       pub,
 		Replicas: []Replica{},
 	}
 

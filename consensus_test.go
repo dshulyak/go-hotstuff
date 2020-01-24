@@ -2,7 +2,6 @@ package hotstuff
 
 import (
 	"crypto/rand"
-	"sort"
 	"testing"
 
 	"github.com/dshulyak/go-hotstuff/crypto"
@@ -39,34 +38,31 @@ type testNode struct {
 	Verifier Verifier
 }
 
-func setupTestNodes(tb testing.TB, n int) map[uint64]*testNode {
+func setupTestNodes(tb testing.TB, n int) []*testNode {
 	genesis := randGenesis()
 	logger, err := zap.NewDevelopment()
 	require.NoError(tb, err)
 
-	pubs, privs := crypto.GenerateKeys(n)
+	pubs, privs, err := crypto.GenerateKeys(nil, n)
 	replicas := make([]uint64, 0, n)
 
-	nodes := map[uint64]*testNode{}
+	nodes := []*testNode{}
 	for id := range pubs {
-		replicas = append(replicas, id)
+		uid := uint64(id)
+		replicas = append(replicas, uid)
 		db := NewMemDB()
 		store := NewBlockStore(db)
-		signer := crypto.NewEd25519Signer(privs[id])
-		verifier := crypto.NewEd25519Verifier(2*len(pubs)/3+1, pubs)
+		signer := crypto.NewBLS12381Signer(privs[uid])
+		verifier := crypto.NewBLS12381Verifier(2*len(pubs)/3+1, pubs)
 		sig := signer.Sign(nil, genesis.Header.Hash())
-		genesis.Cert.Sig.Voters = append(genesis.Cert.Sig.Voters, id)
-		genesis.Cert.Sig.Sigs = append(genesis.Cert.Sig.Sigs, sig)
-		nodes[id] = &testNode{
-			ID:       id,
+		verifier.Merge(genesis.Cert.Sig, uid, sig)
+		nodes = append(nodes, &testNode{
+			ID:       uid,
 			Signer:   signer,
 			Verifier: verifier,
 			Store:    store,
-		}
+		})
 	}
-	sort.Slice(replicas, func(i, j int) bool {
-		return replicas[i] < replicas[j]
-	})
 
 	for _, n := range nodes {
 		require.NoError(tb, ImportGenesis(n.Store, genesis))
@@ -89,11 +85,10 @@ func TestConsensusErrorFreeQuorumProgress(t *testing.T) {
 			if waiting != 0 {
 				require.Fail(t, "both %d and %d are waiting for data", id, waiting)
 			}
-			waiting = id
+			waiting = uint64(id)
 		}
 		n.Progress.Reset()
 	}
-	require.NotZero(t, waiting)
 	root := randRoot()
 	nodes[waiting].Send(nil, root, &types.Data{})
 
@@ -159,10 +154,9 @@ func TestConsensusTimeoutsProgress(t *testing.T) {
 	waiting := uint64(0)
 	for i, n := range nodes {
 		if n.Progress.WaitingData {
-			waiting = i
+			waiting = uint64(i)
 		}
 	}
-	require.NotZero(t, waiting)
 	nodes[waiting].Send(nil, randRoot(), &types.Data{})
 }
 
@@ -199,26 +193,21 @@ func propagateOneBlock(nodes []*testNode) {
 func TestConsensusProgressAfterSync(t *testing.T) {
 	var (
 		nodes = setupTestNodes(t, 4)
-		slice []*testNode
 	)
 
 	for _, n := range nodes {
 		n.Start()
-		slice = append(slice, n)
 	}
-	sort.Slice(slice, func(i, j int) bool {
-		return slice[i].ID < slice[j].ID
-	})
 
-	propagateOneBlock(slice[1:])
-	propagateOneBlock(slice[:3]) // won't make progress, 1st node is missing a block
+	propagateOneBlock(nodes[1:])
+	propagateOneBlock(nodes[:3]) // won't make progress, 1st node is missing a block
 
-	first := slice[0]
+	first := nodes[0]
 	require.Len(t, first.Progress.NotFound, 1)
 	missing := first.Progress.NotFound[0]
 	first.Progress.Reset()
 
-	second := slice[1]
+	second := nodes[1]
 	block, err := second.Store.GetBlock(missing.Hash)
 	require.NoError(t, err)
 	require.NotNil(t, block)
@@ -228,20 +217,3 @@ func TestConsensusProgressAfterSync(t *testing.T) {
 	require.False(t, event.Finalized)
 	require.Equal(t, missing.Hash, event.Header.Hash())
 }
-
-type noopSignerVerifier struct {
-}
-
-func (noop noopSignerVerifier) Sign(dst []byte, _ []byte) []byte {
-	return dst
-}
-
-func (noop noopSignerVerifier) VerifyCert(*types.Certificate) bool {
-	return true
-}
-
-func (noop noopSignerVerifier) VerifySingle(uint64, []byte, []byte) bool {
-	return true
-}
-
-func (noop noopSignerVerifier) Merge(*types.Certificate, *types.Vote) {}

@@ -13,8 +13,8 @@ type Signer interface {
 }
 
 type Verifier interface {
-	VerifyCert([]byte, *types.AggregatedSignature) bool
-	VerifySingle(uint64, []byte, []byte) bool
+	VerifyAggregated([]byte, *types.AggregatedSignature) bool
+	Verify(uint64, []byte, []byte) bool
 	Merge(*types.AggregatedSignature, uint64, []byte)
 }
 
@@ -234,7 +234,7 @@ func (c *consensus) onProposal(msg *types.Proposal) {
 		return
 	}
 
-	if !c.verifier.VerifyCert(msg.Header.Parent, msg.ParentCert.Sig) {
+	if !c.verifier.VerifyAggregated(msg.Header.Parent, msg.ParentCert.Sig) {
 		log.Debug("certificate is invalid")
 		return
 	}
@@ -247,13 +247,13 @@ func (c *consensus) onProposal(msg *types.Proposal) {
 	}
 
 	if msg.Timeout != nil {
-		if !c.verifier.VerifyCert(HashSum(EncodeUint64(msg.Header.View-1)), msg.Timeout.Sig) {
+		if !c.verifier.VerifyAggregated(HashSum(EncodeUint64(msg.Header.View-1)), msg.Timeout.Sig) {
 			return
 		}
 	}
 
 	leader := c.getLeader(msg.Header.View)
-	if !c.verifier.VerifySingle(leader, msg.Header.Hash(), msg.Sig) {
+	if !c.verifier.Verify(leader, msg.Header.Hash(), msg.Sig) {
 		log.Debug("proposal is not signed correctly", zap.Uint64("signer", leader))
 		return
 	}
@@ -418,7 +418,7 @@ func (c *consensus) syncBlock(block *types.Block) bool {
 	if block.Header.View <= c.commit.View {
 		return true
 	}
-	if !c.verifier.VerifyCert(block.Header.Hash(), block.Cert.Sig) {
+	if !c.verifier.VerifyAggregated(block.Header.Hash(), block.Cert.Sig) {
 		return false
 	}
 	log := c.log.With(

@@ -1,22 +1,36 @@
 package crypto
 
 import (
-	"crypto/ed25519"
+	"github.com/kilic/bls12-381/blssig"
 )
 
-func NewEd25519Signer(priv ed25519.PrivateKey) *Ed25519Signer {
-	return &Ed25519Signer{priv: priv}
-}
+/*
+TODO this signature doesn't have any protection against rogue key attack
+*/
 
-type Ed25519Signer struct {
-	priv ed25519.PrivateKey
-}
+var (
+	// TODO separate domains for timeout and regular certificate
+	domain = [8]byte{1, 1, 1}
+)
 
-// Sign appends signature to dst and returns it.
-func (s *Ed25519Signer) Sign(dst, msg []byte) []byte {
-	sig := ed25519.Sign(s.priv, msg)
-	if dst == nil {
-		return sig
+func NewBLS12381Signer(priv blssig.SecretKey) *BLS12381Signer {
+	return &BLS12381Signer{
+		priv: priv,
 	}
-	return append(dst, sig...)
+}
+
+type BLS12381Signer struct {
+	priv blssig.SecretKey
+}
+
+func (s *BLS12381Signer) Sign(dst, msg []byte) []byte {
+	if len(msg) != 32 {
+		panic("message must be exactly 32 bytes")
+	}
+	m := [32]byte{}
+	copy(m[:], msg)
+	sig := blssig.Sign(m, domain, s.priv)
+	// this conversion is quit inneficient, and should be done on the caller side when signature will be sent over
+	// the wiree
+	return append(dst, blssig.SignatureToCompressed(sig)...)
 }

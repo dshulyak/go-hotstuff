@@ -54,7 +54,7 @@ func (t *Timeouts) Collect(nview *types.NewView) bool {
 	if exist {
 		return false
 	}
-	if !t.verifier.VerifySingle(nview.Voter, HashSum(EncodeUint64(nview.View)), nview.Sig) {
+	if !t.verifier.Verify(nview.Voter, HashSum(EncodeUint64(nview.View)), nview.Sig) {
 		return false
 	}
 	t.received[nview.Voter] = struct{}{}
@@ -112,7 +112,7 @@ func (v *Votes) Collect(vote *types.Vote) bool {
 		// duplicate
 		return false
 	}
-	if !v.verifier.VerifySingle(vote.Voter, v.Cert.Block, vote.Sig) {
+	if !v.verifier.Verify(vote.Voter, v.Cert.Block, vote.Sig) {
 		// invalid signature
 		return false
 	}

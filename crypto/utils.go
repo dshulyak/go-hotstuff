@@ -1,18 +1,38 @@
 package crypto
 
-import "crypto/ed25519"
+import (
+	"crypto/rand"
+	"io"
 
-func GenerateKeys(n int) (map[uint64]ed25519.PublicKey, map[uint64]ed25519.PrivateKey) {
-	privs := map[uint64]ed25519.PrivateKey{}
-	pubs := map[uint64]ed25519.PublicKey{}
-	for i := 1; i <= n; i++ {
-		pub, priv, err := ed25519.GenerateKey(nil)
-		if err != nil {
-			panic(err.Error())
-		}
-		idx := uint64(i)
-		privs[idx] = priv
-		pubs[idx] = pub
+	"github.com/kilic/bls12-381/blssig"
+)
+
+type (
+	PublicKey  = blssig.PublicKey
+	PrivateKey = blssig.SecretKey
+)
+
+func GenerateKey(rng io.Reader) (PrivateKey, *PublicKey, error) {
+	if rng == nil {
+		rng = rand.Reader
 	}
-	return pubs, privs
+	priv, err := blssig.RandSecretKey(rng)
+	if err != nil {
+		return nil, nil, err
+	}
+	return priv, blssig.PublicKeyFromSecretKey(priv), nil
+}
+
+func GenerateKeys(rng io.Reader, n int) ([]PublicKey, []PrivateKey, error) {
+	pubs := make([]blssig.PublicKey, n)
+	privs := make([]blssig.SecretKey, n)
+	for i := range privs {
+		priv, pub, err := GenerateKey(rng)
+		if err != nil {
+			return nil, nil, err
+		}
+		privs[i] = priv
+		pubs[i] = *pub
+	}
+	return pubs, privs, nil
 }
